@@ -32,7 +32,7 @@ export class RunsService {
       data: {
         type: dto.type,
         status: RunStatus.PENDING,
-        repoId: dto.repoId ?? null,
+        repoId: dto.repoId || null,
         input: dto.input as Prisma.InputJsonValue,
       },
     });

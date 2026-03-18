@@ -34,7 +34,7 @@ export class ChatService {
       const repoName = repo?.fullName ?? '';
 
       // Ensure the session row exists before writing messages.
-      await this.memory.ensureSession(dto.sessionId, dto.repoId ?? null, userId);
+      await this.memory.ensureSession(dto.sessionId, dto.repoId || undefined, userId);
 
       // Run the orchestrator FIRST so getContextWindow only sees previous turns.
       // Persisting the user message beforehand would duplicate it in the LLM prompt.
@@ -105,7 +105,7 @@ export class ChatService {
     try {
       const repo = dto.repoId ? await this.repoService.findOne(dto.repoId) : null;
       const repoName = repo?.fullName ?? '';
-      await this.memory.ensureSession(dto.sessionId, dto.repoId ?? null, userId);
+      await this.memory.ensureSession(dto.sessionId, dto.repoId || undefined, userId);
 
       const result = await this.orchestrator.chatStream(
         dto.sessionId,

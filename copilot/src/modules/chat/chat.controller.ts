@@ -73,7 +73,8 @@ export class ChatController {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
-    const send = (data: Record<string, unknown>) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const send = (data: any) => {
       res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 
