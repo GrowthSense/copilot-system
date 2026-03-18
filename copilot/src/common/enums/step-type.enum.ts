@@ -1,0 +1,7 @@
+export enum StepType {
+  REASONING = 'REASONING',
+  TOOL_CALL = 'TOOL_CALL',
+  LLM_CALL = 'LLM_CALL',
+  VALIDATION = 'VALIDATION',
+  SUMMARY = 'SUMMARY',
+}

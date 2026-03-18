@@ -1,0 +1,594 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector")]
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum RunType {
+  ANSWER_QUESTION
+  FIND_FILES
+  EXPLAIN_CODE
+  PROPOSE_PATCH
+  GENERATE_TESTS
+  CREATE_PR_DRAFT
+  REVIEW_CODE
+  RUN_TESTS
+  CHAT
+}
+
+enum StepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum StepType {
+  REASONING
+  TOOL_CALL
+  LLM_CALL
+  VALIDATION
+  SUMMARY
+}
+
+enum ApprovalStatus {
+  WAITING
+  APPROVED
+  REJECTED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum PrDraftStatus {
+  DRAFT
+  OPEN
+  MERGED
+  CLOSED
+  ABANDONED
+}
+
+enum AuditAction {
+  RUN_CREATED
+  RUN_STARTED
+  RUN_COMPLETED
+  RUN_FAILED
+  RUN_CANCELLED
+  STEP_CREATED
+  STEP_STARTED
+  STEP_COMPLETED
+  STEP_FAILED
+  TOOL_EXECUTED
+  APPROVAL_REQUESTED
+  APPROVAL_GRANTED
+  APPROVAL_REJECTED
+  PATCH_CREATED
+  PATCH_APPLIED
+  PR_DRAFT_CREATED
+  PR_DRAFT_SUBMITTED
+  PR_DRAFT_CLOSED
+  KNOWLEDGE_SOURCE_INGESTED
+  KNOWLEDGE_SOURCE_DELETED
+  REPO_INDEXED
+}
+
+enum LlmProvider {
+  OPENAI
+  ANTHROPIC
+  MISTRAL
+  LOCAL
+}
+
+enum IndexStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum RepoFileStatus {
+  INDEXED
+  SKIPPED
+  ERROR
+}
+
+enum KnowledgeSourceType {
+  PROCESS_DOC
+  ENGINEERING_STANDARD
+  TOOL_DOC
+  WEBPAGE
+  MARKDOWN
+  PLAIN_TEXT
+  REPO_FILE
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model Repo {
+  id            String   @id @default(cuid())
+  name          String
+  fullName      String   @unique
+  cloneUrl      String
+  defaultBranch String   @default("main")
+  description   String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  documents KnowledgeDocument[]
+  runs      AgentRun[]
+  indexes   RepoIndex[]
+  files     RepoFile[]
+
+  @@map("repos")
+}
+
+// ── Repository indexing models ────────────────────────────────────────────────
+
+model RepoIndex {
+  id              String      @id @default(cuid())
+  repoId          String
+  status          IndexStatus @default(PENDING)
+  localPath       String
+  branch          String      @default("main")
+  ignorePatterns  String[]
+  totalFiles      Int         @default(0)
+  indexedFiles    Int         @default(0)
+  skippedFiles    Int         @default(0)
+  errorFiles      Int         @default(0)
+  /// First 50 error messages from the run, newline-separated.
+  errorLog        String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  repo  Repo       @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  files RepoFile[]
+
+  @@index([repoId])
+  @@index([status])
+  @@index([repoId, createdAt])
+  @@map("repo_indexes")
+}
+
+model RepoFile {
+  id           String        @id @default(cuid())
+  repoId       String
+  indexId      String
+  /// Path relative to the repo root (uses forward slashes on all platforms).
+  filePath     String
+  fileName     String
+  extension    String?
+  language     String?
+  sizeBytes    Int
+  contentHash  String
+  lineCount    Int           @default(0)
+  status       RepoFileStatus @default(INDEXED)
+  errorMessage String?
+  metadata     Json          @default("{}")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  repo   Repo        @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  index  RepoIndex   @relation(fields: [indexId], references: [id], onDelete: Cascade)
+  chunks RepoFileChunk[]
+
+  @@unique([repoId, filePath])
+  @@index([repoId])
+  @@index([indexId])
+  @@index([extension])
+  @@index([language])
+  @@index([repoId, status])
+  @@map("repo_files")
+}
+
+model RepoFileChunk {
+  id            String   @id @default(cuid())
+  fileId        String
+  repoId        String
+  chunkIndex    Int
+  content       String
+  startLine     Int
+  endLine       Int
+  tokenEstimate Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // embedding Unsupported("vector(1536)")?
+  // Uncomment above and run migration once pgvector symbol embeddings are wired (Phase 6).
+  // @@index([embedding], type: Hnsw(distanceMetric: Cosine))
+
+  file RepoFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, chunkIndex])
+  @@index([fileId])
+  @@index([repoId])
+  @@map("repo_file_chunks")
+}
+
+// Legacy model — kept for repo source-code file indexing.
+// General knowledge documents use KnowledgeSource + KnowledgeChunk instead.
+model KnowledgeDocument {
+  id          String   @id @default(cuid())
+  repoId      String
+  filePath    String
+  language    String?
+  content     String
+  contentHash String
+  chunkIndex  Int      @default(0)
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  repo Repo @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([repoId, filePath, chunkIndex])
+  @@index([repoId])
+  @@map("knowledge_documents")
+}
+
+// ── Knowledge pipeline models ────────────────────────────────────────────────
+
+model KnowledgeSource {
+  id          String              @id @default(cuid())
+  title       String
+  sourceType  KnowledgeSourceType
+  sourceRef   String
+  checksum    String
+  tags        String[]
+  wordCount   Int                 @default(0)
+  isActive    Boolean             @default(true)
+  metadata    Json                @default("{}")
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  chunks KnowledgeChunk[]
+
+  @@unique([sourceRef, sourceType])
+  @@index([sourceType])
+  @@index([isActive])
+  @@map("knowledge_sources")
+}
+
+model KnowledgeChunk {
+  id            String   @id @default(cuid())
+  sourceId      String
+  chunkIndex    Int
+  content       String
+  contentLength Int
+  tokenEstimate Int
+  startChar     Int
+  endChar       Int
+  metadata      Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // embedding Unsupported("vector(1536)")?
+  // Uncomment the line above and run a migration once pgvector embeddings are wired.
+  // Add the following index once the column exists:
+  // @@index([embedding], type: Hnsw(distanceMetric: Cosine))
+
+  source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, chunkIndex])
+  @@index([sourceId])
+  @@map("knowledge_chunks")
+}
+
+model AgentRun {
+  id               String       @id @default(cuid())
+  repoId           String?
+  type             RunType
+  status           RunStatus    @default(PENDING)
+  input            Json
+  output           Json?
+  error            String?
+  llmProvider      LlmProvider?
+  llmModel         String?
+  promptTokens     Int?
+  completionTokens Int?
+  durationMs       Int?
+  metadata         Json         @default("{}")
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  startedAt        DateTime?
+  completedAt      DateTime?
+
+  repo           Repo?              @relation(fields: [repoId], references: [id], onDelete: SetNull)
+  steps          AgentRunStep[]
+  toolExecutions ToolExecution[]
+  patchProposals PatchProposal[]
+  prDrafts       PullRequestDraft[]
+  approvals      ApprovalRequest[]
+  auditLogs      AuditLog[]
+  testFiles      GeneratedTest[]
+  codeReviews    CodeReview[]
+  testRunResults TestRunResult[]
+
+  @@index([status])
+  @@index([type])
+  @@index([repoId])
+  @@index([createdAt])
+  @@map("agent_runs")
+}
+
+model AgentRunStep {
+  id            String     @id @default(cuid())
+  runId         String
+  stepIndex     Int
+  type          StepType
+  status        StepStatus @default(PENDING)
+  stageName     String?
+  toolName      String?
+  input         Json?
+  output        Json?
+  resultSummary String?
+  error         String?
+  durationMs    Int?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  run            AgentRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  toolExecutions ToolExecution[]
+
+  @@unique([runId, stepIndex])
+  @@index([runId])
+  @@index([runId, status])
+  @@map("agent_run_steps")
+}
+
+model ToolExecution {
+  id          String    @id @default(cuid())
+  runId       String
+  stepId      String?
+  toolName    String
+  parameters  Json
+  result      Json?
+  error       String?
+  isSuccess   Boolean   @default(false)
+  durationMs  Int?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  run  AgentRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  step AgentRunStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+
+  @@index([runId])
+  @@index([stepId])
+  @@index([toolName])
+  @@map("tool_executions")
+}
+
+model PatchProposal {
+  id          String    @id @default(cuid())
+  runId       String?
+  repoId      String?
+  title       String
+  description String?
+  diff        String
+  filePaths   String[]
+  riskLevel   RiskLevel @default(LOW)
+  isApplied   Boolean   @default(false)
+  appliedAt   DateTime?
+  prUrl       String?
+  metadata    Json      @default("{}")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  run       AgentRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  approvals ApprovalRequest[]
+
+  @@index([runId])
+  @@index([riskLevel])
+  @@index([isApplied])
+  @@map("patch_proposals")
+}
+
+model PullRequestDraft {
+  id           String        @id @default(cuid())
+  runId        String?
+  repoId       String?
+  repoFullName String
+  title        String
+  body         String
+  headBranch   String
+  baseBranch   String        @default("main")
+  labels       String[]
+  status       PrDraftStatus @default(DRAFT)
+  prNumber     Int?
+  prUrl        String?
+  metadata     Json          @default("{}")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  submittedAt  DateTime?
+
+  run       AgentRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  approvals ApprovalRequest[]
+
+  @@index([runId])
+  @@index([status])
+  @@index([repoFullName])
+  @@map("pull_request_drafts")
+}
+
+model ApprovalRequest {
+  id          String         @id @default(cuid())
+  runId       String?
+  patchId     String?
+  prDraftId   String?
+  testgenId   String?
+  status      ApprovalStatus @default(WAITING)
+  riskLevel   RiskLevel
+  reason      String
+  reviewedBy  String?
+  reviewNotes String?
+  expiresAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  reviewedAt  DateTime?
+
+  run     AgentRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  patch   PatchProposal?    @relation(fields: [patchId], references: [id], onDelete: SetNull)
+  prDraft PullRequestDraft? @relation(fields: [prDraftId], references: [id], onDelete: SetNull)
+  testgen GeneratedTest?    @relation(fields: [testgenId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([runId])
+  @@index([riskLevel])
+  @@map("approval_requests")
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  runId      String?
+  action     AuditAction
+  actorType  String      @default("system")
+  actorId    String?
+  entityType String?
+  entityId   String?
+  detail     Json        @default("{}")
+  ipAddress  String?
+  createdAt  DateTime    @default(now())
+
+  run AgentRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([runId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model GeneratedTest {
+  id         String   @id @default(cuid())
+  runId      String?
+  repoId     String?
+  targetFile String
+  testFile   String
+  content    String
+  framework  String   @default("jest")
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  run            AgentRun?          @relation(fields: [runId], references: [id], onDelete: SetNull)
+  approvals      ApprovalRequest[]
+  testRunResults TestRunResult[]
+
+  @@map("generated_tests")
+}
+
+model CodeReview {
+  id          String   @id @default(cuid())
+  runId       String?
+  repoId      String?
+  filePath    String
+  summary     String
+  overallRisk String
+  findings    Json     @default("[]")
+  positives   Json     @default("[]")
+  testingRecs Json     @default("[]")
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  run AgentRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([runId])
+  @@index([repoId])
+  @@index([filePath])
+  @@map("code_reviews")
+}
+
+model TestRunResult {
+  id         String   @id @default(cuid())
+  runId      String?
+  testgenId  String?
+  repoId     String?
+  script     String   @default("test")
+  exitCode   Int
+  passed     Boolean
+  stdout     String   @default("")
+  stderr     String   @default("")
+  durationMs Int      @default(0)
+  timedOut   Boolean  @default(false)
+  command    String   @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  run     AgentRun?      @relation(fields: [runId], references: [id], onDelete: SetNull)
+  testgen GeneratedTest? @relation(fields: [testgenId], references: [id], onDelete: SetNull)
+
+  @@index([runId])
+  @@index([testgenId])
+  @@index([repoId])
+  @@map("test_run_results")
+}
+
+// ── Auth models ───────────────────────────────────────────────────────────────
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  chatSessions ChatSession[]
+
+  @@map("users")
+}
+
+// ── Chat persistence models ───────────────────────────────────────────────────
+
+model ChatSession {
+  id        String        @id @default(cuid())
+  repoId    String?
+  userId    String?
+  title     String        @default("New Chat")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+  user      User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([repoId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id        String      @id @default(cuid())
+  sessionId String
+  role      String
+  content   String
+  createdAt DateTime    @default(now())
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([sessionId, createdAt])
+  @@map("chat_messages")
+}
