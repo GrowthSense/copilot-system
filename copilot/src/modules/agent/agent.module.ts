@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { AgentOrchestrator } from './agent.orchestrator';
+import { ReactEngine } from './react-engine.service';
 import { RunsModule } from '../runs/runs.module';
 import { LlmModule } from '../llm/llm.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
@@ -14,9 +15,11 @@ import { GithubModule } from '../github/github.module';
 import { ReviewModule } from '../review/review.module';
 import { TestrunnerModule } from '../testrunner/testrunner.module';
 import { ToolsModule } from '../tools/tools.module';
+import { DatabaseModule } from '../database/database.module';
 
 @Module({
   imports: [
+    DatabaseModule,    // DatabaseService — direct DB access (repoIndex queries)
     RunsModule,        // RunsService — run/step lifecycle
     LlmModule,         // LlmService — structured LLM completions
     KnowledgeModule,   // RetrievalService — knowledge base lookups
@@ -31,7 +34,7 @@ import { ToolsModule } from '../tools/tools.module';
     ToolsModule,       // RunTestsTool — shell test execution
   ],
   controllers: [AgentController],
-  providers: [AgentService, AgentOrchestrator],
-  exports: [AgentService],
+  providers: [AgentService, AgentOrchestrator, ReactEngine],
+  exports: [AgentService, ReactEngine],
 })
 export class AgentModule {}

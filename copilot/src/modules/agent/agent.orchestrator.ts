@@ -13,6 +13,10 @@ import { GithubService } from '../github/github.service';
 import { ReviewService } from '../review/review.service';
 import { TestrunnerService } from '../testrunner/testrunner.service';
 import { RunTestsTool } from '../tools/tools/run-tests.tool';
+import { WriteFileTool } from '../tools/tools/write-file.tool';
+import { CreateDirectoryTool } from '../tools/tools/create-directory.tool';
+import { RunCommandTool } from '../tools/tools/run-command.tool';
+import { ScaffoldProjectTool } from '../tools/tools/scaffold-project.tool';
 import { AppConfigService } from '../../config/config.service';
 import { RunType } from '../../common/enums/run-type.enum';
 import { StepType } from '../../common/enums/step-type.enum';
@@ -30,6 +34,8 @@ import { ReviewCodeDto } from './dto/review-code.dto';
 import { ReviewCodeResponseDto } from './dto/review-code-response.dto';
 import { RunTestsAgentDto } from './dto/run-tests-agent.dto';
 import { RunTestsAgentResponseDto } from './dto/run-tests-agent-response.dto';
+import { ScaffoldProjectDto } from './dto/scaffold-project.dto';
+import { ScaffoldProjectResponseDto } from './dto/scaffold-project-response.dto';
 import {
   AskRepoQuestionResponseDto,
   RelevantFileRefDto,
@@ -45,6 +51,10 @@ import { CreatePrDraftAgentResponseDto } from './dto/create-pr-draft-agent-respo
 import { FileMatchResult, MatchReason } from '../repo/interfaces/repo-index.interface';
 import { ChunkResult } from '../knowledge/interfaces/knowledge-source.interface';
 import { splitRepoFullName } from '../github/interfaces/github.interface';
+import { WriteAndRunTestDto } from './dto/write-and-run-test.dto';
+import { DatabaseService } from '../database/database.service';
+import * as fs from 'fs';
+import * as nodePath from 'path';
 
 /** Maximum lines per file passed as LLM context. Prevents token-budget overflow. */
 const MAX_CONTEXT_LINES_PER_FILE = 200;
@@ -75,6 +85,11 @@ export class AgentOrchestrator {
     private readonly testrunnerService: TestrunnerService,
     private readonly runTestsTool: RunTestsTool,
     private readonly config: AppConfigService,
+    private readonly writeFileTool: WriteFileTool,
+    private readonly createDirectoryTool: CreateDirectoryTool,
+    private readonly runCommandTool: RunCommandTool,
+    private readonly scaffoldProjectTool: ScaffoldProjectTool,
+    private readonly db: DatabaseService,
   ) {}
 
   // ─── ask() ────────────────────────────────────────────────────────────────
@@ -768,6 +783,116 @@ export class AgentOrchestrator {
     }
   }
 
+  // ─── writeAndRunTest() ────────────────────────────────────────────────────
+  // Writes the generated test to disk in the repo, then runs just that file.
+
+  async writeAndRunTest(dto: WriteAndRunTestDto): Promise<RunTestsAgentResponseDto> {
+    const start = Date.now();
+
+    const run = await this.runsService.create({
+      type: RunType.RUN_TESTS,
+      repoId: dto.repoId,
+      input: { testgenId: dto.testgenId, mode: 'write-and-run' },
+    });
+
+    await this.runsService.markRunning(run.id);
+    this.logger.log(`[writeAndRunTest] runId=${run.id} testgenId=${dto.testgenId}`);
+
+    try {
+      // 1. Load the generated test record
+      const testgen = await this.runStage(
+        run.id, 0, 'load_testgen', StepType.REASONING, undefined,
+        { testgenId: dto.testgenId },
+        () => this.testgenService.findOne(dto.testgenId),
+      );
+
+      // 2. Resolve the repo's local path from the latest completed index
+      const repoRoot = await this.runStage(
+        run.id, 1, 'resolve_repo_root', StepType.REASONING, undefined,
+        { repoId: dto.repoId },
+        async () => {
+          const index = await this.db.repoIndex.findFirst({
+            where: { repoId: dto.repoId, status: 'COMPLETED' },
+            orderBy: { createdAt: 'desc' },
+            select: { localPath: true },
+          });
+          if (!index?.localPath) {
+            throw new Error(`No completed index for repo "${dto.repoId}". Index the repo first.`);
+          }
+          return index.localPath;
+        },
+      );
+
+      // 3. Write the test file to disk
+      const absoluteTestPath = await this.runStage(
+        run.id, 2, 'write_test_file', StepType.TOOL_CALL, 'write_file',
+        { testFile: testgen.testFile, repoRoot },
+        async () => {
+          const absPath = nodePath.join(repoRoot, testgen.testFile);
+          fs.mkdirSync(nodePath.dirname(absPath), { recursive: true });
+          fs.writeFileSync(absPath, testgen.content, 'utf-8');
+          this.logger.log(`[writeAndRunTest] Wrote ${testgen.testFile} (${testgen.content.length} bytes)`);
+          return absPath;
+        },
+      );
+
+      this.logger.log(`[writeAndRunTest] Test written to ${absoluteTestPath}`);
+
+      // 4. Run only the newly written test file
+      const testResult = await this.runStage(
+        run.id, 3, 'run_test_file', StepType.TOOL_CALL, 'run_tests',
+        { testFile: testgen.testFile, script: dto.script ?? 'test' },
+        () => this.runTestsTool.execute(
+          {
+            repoId: dto.repoId,
+            script: dto.script ?? 'test',
+            testFile: testgen.testFile,
+            timeoutMs: dto.timeoutMs,
+          },
+          { runId: run.id },
+        ),
+      );
+
+      // 5. Persist the test run result
+      const resultRecord = await this.runStage(
+        run.id, 4, 'persist_result', StepType.TOOL_CALL, undefined,
+        { passed: testResult.passed, exitCode: testResult.exitCode },
+        () => this.testrunnerService.persistResult({
+          runId: run.id,
+          testgenId: dto.testgenId,
+          repoId: dto.repoId,
+          script: dto.script ?? 'test',
+          exitCode: testResult.exitCode,
+          passed: testResult.passed,
+          stdout: testResult.stdout,
+          stderr: testResult.stderr,
+          durationMs: testResult.durationMs,
+          timedOut: testResult.timedOut,
+          command: testResult.command,
+        }),
+      );
+
+      await this.runsService.complete(run.id, { passed: testResult.passed }, Date.now() - start);
+
+      return {
+        runId: run.id,
+        testRunResultId: resultRecord.id,
+        testgenId: dto.testgenId,
+        passed: testResult.passed,
+        exitCode: testResult.exitCode,
+        stdout: testResult.stdout,
+        stderr: testResult.stderr,
+        durationMs: testResult.durationMs,
+        timedOut: testResult.timedOut,
+        command: testResult.command,
+      };
+    } catch (err: unknown) {
+      await this.runsService.fail(run.id, toMessage(err), Date.now() - start);
+      this.logger.error(`[writeAndRunTest] runId=${run.id} FAILED: ${toMessage(err)}`);
+      throw err;
+    }
+  }
+
   // ─── createPrDraft() ──────────────────────────────────────────────────────
 
   async createPrDraft(dto: CreatePrDraftAgentDto): Promise<CreatePrDraftAgentResponseDto> {
@@ -978,6 +1103,118 @@ export class AgentOrchestrator {
     } catch (err: unknown) {
       await this.runsService.fail(run.id, toMessage(err), Date.now() - start);
       this.logger.error(`[createPrDraft] runId=${run.id} FAILED: ${toMessage(err)}`);
+      throw err;
+    }
+  }
+
+  // ─── scaffoldProject() ────────────────────────────────────────────────────
+
+  async scaffoldProject(dto: ScaffoldProjectDto): Promise<ScaffoldProjectResponseDto> {
+    const start = Date.now();
+
+    const run = await this.runsService.create({
+      type: RunType.SCAFFOLD_PROJECT,
+      repoId: undefined,
+      input: { description: dto.description, projectName: dto.projectName, outputDir: dto.outputDir, frameworkHint: dto.frameworkHint, approvalId: dto.approvalId },
+    });
+
+    await this.runsService.markRunning(run.id);
+    this.logger.log(`[scaffoldProject] runId=${run.id} project=${dto.projectName}`);
+
+    let stepIndex = 0;
+
+    try {
+      // Step 1: Check approval gate
+      await this.runStage(
+        run.id, stepIndex++, 'check_approval_gate', StepType.VALIDATION, undefined,
+        { approvalId: dto.approvalId },
+        async () => {
+          const approval = await this.approvalService.findOne(dto.approvalId);
+          if (approval.status !== ApprovalStatus.APPROVED) {
+            throw new ValidationException(
+              `Approval "${dto.approvalId}" has status "${approval.status}" — ` +
+              `scaffolding requires an APPROVED approval. ` +
+              `Approve via PATCH /api/v1/approvals/${dto.approvalId}/approve first.`,
+            );
+          }
+          return approval;
+        },
+      );
+
+      // Step 2: LLM plans the scaffold (picks template + args)
+      const plan = await this.runStage(
+        run.id, stepIndex++, 'plan_scaffold', StepType.LLM_CALL, undefined,
+        { description: dto.description, projectName: dto.projectName },
+        () => this.llm.planScaffold({
+          description: dto.description,
+          projectName: dto.projectName,
+          frameworkHint: dto.frameworkHint,
+        }),
+      );
+
+      this.logger.log(`[scaffoldProject] plan: template=${plan.template} extraArgs=${plan.extraArgs.join(' ')}`);
+
+      // Step 3: Ensure output directory exists
+      await this.runStage(
+        run.id, stepIndex++, 'create_output_dir', StepType.TOOL_CALL, 'create_directory',
+        { absolutePath: dto.outputDir },
+        () => this.createDirectoryTool.execute({ absolutePath: dto.outputDir, recursive: true }, { runId: run.id }),
+      );
+
+      // Step 4: Scaffold the project
+      const scaffoldResult = await this.runStage(
+        run.id, stepIndex++, 'scaffold_project', StepType.TOOL_CALL, 'scaffold_project',
+        { outputDir: dto.outputDir, projectName: dto.projectName, template: plan.template },
+        () => this.scaffoldProjectTool.execute({
+          outputDir: dto.outputDir,
+          projectName: dto.projectName,
+          template: plan.template,
+          extraArgs: plan.extraArgs,
+        }, { runId: run.id }),
+      );
+
+      if (!scaffoldResult.success) {
+        throw new Error(
+          `Scaffolding failed (exit ${scaffoldResult.exitCode}): ${scaffoldResult.stderr || scaffoldResult.stdout}`,
+        );
+      }
+
+      // Step 5: Build the project to verify it compiles
+      const buildScript = plan.buildScript ?? 'build';
+      const buildResult = await this.runStage(
+        run.id, stepIndex++, 'build_project', StepType.TOOL_CALL, 'run_command',
+        { cwd: scaffoldResult.projectPath, script: buildScript },
+        () => this.runCommandTool.execute({
+          cwd: scaffoldResult.projectPath,
+          script: buildScript,
+          timeoutMs: 180_000,
+        }, { runId: run.id }),
+      );
+
+      const durationMs = Date.now() - start;
+
+      await this.runsService.complete(run.id, {
+        projectPath: scaffoldResult.projectPath,
+        template: plan.template,
+        scaffoldSuccess: scaffoldResult.success,
+        buildSuccess: buildResult.success,
+      }, durationMs);
+
+      return {
+        runId: run.id,
+        projectName: dto.projectName,
+        projectPath: scaffoldResult.projectPath,
+        template: plan.template,
+        extraArgs: plan.extraArgs,
+        scaffoldSuccess: scaffoldResult.success,
+        buildSuccess: buildResult.success,
+        scaffoldOutput: scaffoldResult.stdout || scaffoldResult.stderr,
+        buildOutput: buildResult.stdout || buildResult.stderr,
+        durationMs,
+      };
+    } catch (err: unknown) {
+      await this.runsService.fail(run.id, toMessage(err), Date.now() - start);
+      this.logger.error(`[scaffoldProject] runId=${run.id} FAILED: ${toMessage(err)}`);
       throw err;
     }
   }

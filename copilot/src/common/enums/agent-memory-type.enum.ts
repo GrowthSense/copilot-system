@@ -1,0 +1,7 @@
+export enum AgentMemoryType {
+  FACT = 'FACT',
+  OBSERVATION = 'OBSERVATION',
+  DECISION = 'DECISION',
+  INSIGHT = 'INSIGHT',
+  RESEARCH = 'RESEARCH',
+}

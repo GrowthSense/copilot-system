@@ -5,6 +5,7 @@ import { Message, CodeReview } from '@/lib/types';
 import FileReference from './FileReference';
 import SourceReference from './SourceReference';
 import ReviewFindings from './ReviewFindings';
+import ToolSteps from './ToolSteps';
 import { User, Bot, Copy, Check } from 'lucide-react';
 
 interface Props {
@@ -201,6 +202,11 @@ export default function MessageBubble({ message }: Props) {
         {/* Sources */}
         {!isUser && message.sources && message.sources.length > 0 && (
           <SourceReference sources={message.sources} />
+        )}
+
+        {/* Tool steps — shown before agent action cards */}
+        {!isUser && message.toolSteps && message.toolSteps.length > 0 && (
+          <ToolSteps steps={message.toolSteps} />
         )}
 
         {/* Agent action cards */}

@@ -3,7 +3,7 @@ import * as path from 'path';
 
 export interface ShellRunOptions {
   /** Must be one of the allowlisted executables. */
-  executable: 'npm' | 'yarn' | 'pnpm';
+  executable: 'npm' | 'yarn' | 'pnpm' | 'npx';
   /** Arguments passed directly to `spawn` — never interpolated into a shell string. */
   args: string[];
   /** Absolute working directory. Must be pre-validated as safe by the caller. */

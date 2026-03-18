@@ -98,6 +98,21 @@ export class AppConfigService {
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
+  // ─── Web Research ─────────────────────────────────────────────────────────
+
+  /** 'tavily' (default) or 'serper' */
+  get webSearchProvider(): string {
+    return this.config.get<string>('WEB_SEARCH_PROVIDER') ?? 'tavily';
+  }
+
+  get webSearchApiKey(): string {
+    return this.config.get<string>('WEB_SEARCH_API_KEY') ?? '';
+  }
+
+  get webSearchMaxResults(): number {
+    return parseInt(this.config.get<string>('WEB_SEARCH_MAX_RESULTS') ?? '5', 10);
+  }
+
   get isProduction(): boolean {
     return this.nodeEnv === 'production';
   }

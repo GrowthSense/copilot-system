@@ -3,12 +3,13 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { MessageSquare, BookOpen, GitBranch, Settings, LogOut, UserCircle2, ShieldCheck, FlaskConical, Bell } from 'lucide-react';
+import { MessageSquare, BookOpen, GitBranch, Settings, LogOut, UserCircle2, ShieldCheck, FlaskConical, Bell, BrainCircuit } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { usePendingApprovals } from '@/lib/usePendingApprovals';
 
 const NAV_ITEMS = [
   { href: '/chat', icon: MessageSquare, label: 'Chat' },
+  { href: '/tasks', icon: BrainCircuit, label: 'Agent Tasks' },
   { href: '/review', icon: ShieldCheck, label: 'Review' },
   { href: '/tests', icon: FlaskConical, label: 'Tests' },
   { href: '/approvals', icon: Bell, label: 'Approvals' },

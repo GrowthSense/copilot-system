@@ -67,9 +67,14 @@ export class RepoSearchService {
     >();
 
     // ── Filename and path term matching ──────────────────────────────────────
+    const pathFilter: Prisma.RepoFileWhereInput = dto.pathPrefix
+      ? { filePath: { startsWith: dto.pathPrefix } }
+      : {};
+
     const fileWhere: Prisma.RepoFileWhereInput = {
       repoId,
       status: RepoFileStatus.INDEXED,
+      ...pathFilter,
       OR: terms.flatMap((term) => [
         { fileName: { contains: term, mode: 'insensitive' } },
         { filePath: { contains: term, mode: 'insensitive' } },
@@ -106,7 +111,10 @@ export class RepoSearchService {
         where: {
           repoId,
           content: { contains: term, mode: 'insensitive' },
-          file: { status: RepoFileStatus.INDEXED },
+          file: {
+            status: RepoFileStatus.INDEXED,
+            ...(dto.pathPrefix ? { filePath: { startsWith: dto.pathPrefix } } : {}),
+          },
         },
         include: { file: { select: fileSelectFields() } },
         take: 200,

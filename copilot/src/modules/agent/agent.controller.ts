@@ -19,6 +19,9 @@ import { ReviewCodeDto } from './dto/review-code.dto';
 import { ReviewCodeResponseDto } from './dto/review-code-response.dto';
 import { RunTestsAgentDto } from './dto/run-tests-agent.dto';
 import { RunTestsAgentResponseDto } from './dto/run-tests-agent-response.dto';
+import { WriteAndRunTestDto } from './dto/write-and-run-test.dto';
+import { ScaffoldProjectDto } from './dto/scaffold-project.dto';
+import { ScaffoldProjectResponseDto } from './dto/scaffold-project-response.dto';
 import { created, ok } from '../../common/utils/response.util';
 import { ApiResponse } from '../../common/interfaces/api-response.interface';
 import { AgentRunResponseDto } from './dto/agent-run-response.dto';
@@ -165,6 +168,38 @@ export class AgentController {
   ): Promise<ApiResponse<RunTestsAgentResponseDto>> {
     const result = await this.agentService.runTests(dto);
     return ok(result, 'Tests executed');
+  }
+
+  /**
+   * POST /api/v1/agent/scaffold-project
+   *
+   * Scaffold a new project from scratch using a framework CLI, then build it.
+   * Steps: check approval → LLM picks template → scaffold → npm build
+   * Requires an APPROVED ApprovalRequest before any filesystem operations begin.
+   */
+  /**
+   * POST /api/v1/agent/write-and-run-test
+   *
+   * Write the generated test file to disk in the target project, then execute
+   * only that file using Jest's --testPathPattern flag.
+   * Returns pass/fail, stdout, stderr, and the run result ID.
+   */
+  @Post('write-and-run-test')
+  @HttpCode(HttpStatus.OK)
+  async writeAndRunTest(
+    @Body() dto: WriteAndRunTestDto,
+  ): Promise<ApiResponse<RunTestsAgentResponseDto>> {
+    const result = await this.agentService.writeAndRunTest(dto);
+    return ok(result, result.passed ? 'Tests passed' : 'Tests failed');
+  }
+
+  @Post('scaffold-project')
+  @HttpCode(HttpStatus.OK)
+  async scaffoldProject(
+    @Body() dto: ScaffoldProjectDto,
+  ): Promise<ApiResponse<ScaffoldProjectResponseDto>> {
+    const result = await this.agentService.scaffoldProject(dto);
+    return ok(result, 'Project scaffolded successfully');
   }
 
   // ─── Run management ───────────────────────────────────────────────────────

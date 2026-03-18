@@ -88,6 +88,16 @@ export interface AgentAction {
   data: CodeReview | GeneratedTestResult | Record<string, unknown>;
 }
 
+// ─── Tool step (one tool call made by the agent) ──────────────────────────────
+
+export interface ToolStep {
+  toolName: string;
+  label: string;
+  input: Record<string, unknown>;
+  output: string;
+  success: boolean;
+}
+
 // ─── Chat types ───────────────────────────────────────────────────────────────
 
 export interface Message {
@@ -99,6 +109,7 @@ export interface Message {
   timestamp: Date;
   error?: boolean;
   agentAction?: AgentAction;
+  toolSteps?: ToolStep[];
 }
 
 export interface ChatApiResponse {
@@ -109,6 +120,7 @@ export interface ChatApiResponse {
   sessionId: string;
   durationMs: number;
   agentAction?: AgentAction;
+  toolSteps?: ToolStep[];
 }
 
 export interface Repo {
@@ -180,6 +192,96 @@ export interface AuthUser {
 export interface AuthResponse {
   token: string;
   user: AuthUser;
+}
+
+// ─── Agent Task types ─────────────────────────────────────────────────────────
+
+export type AgentTaskStatus =
+  | 'AWAITING_PLAN_APPROVAL'
+  | 'PLAN_APPROVED'
+  | 'PLAN_REJECTED'
+  | 'RUNNING'
+  | 'AWAITING_STEP_APPROVAL'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export type AgentTaskStepStatus =
+  | 'PENDING'
+  | 'AWAITING_APPROVAL'
+  | 'APPROVED'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'SKIPPED';
+
+export type AgentMemoryType = 'FACT' | 'OBSERVATION' | 'DECISION' | 'INSIGHT' | 'RESEARCH';
+
+export interface AgentTaskStep {
+  id: string;
+  taskId: string;
+  stepIndex: number;
+  title: string;
+  description: string;
+  toolName: string | null;
+  toolInputHint: string | null;
+  requiresApproval: boolean;
+  reasoning: string;
+  status: AgentTaskStepStatus;
+  toolInput: Record<string, unknown> | null;
+  toolOutput: Record<string, unknown> | null;
+  observation: string | null;
+  errorMessage: string | null;
+  approvalId: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface AgentMemory {
+  id: string;
+  repoId: string | null;
+  taskId: string | null;
+  type: AgentMemoryType;
+  subject: string;
+  content: string;
+  confidence: number;
+  tags: string[];
+  isDeleted: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentTaskPlan {
+  taskSummary?: string;
+  planReasoning?: string;
+  estimatedRiskLevel?: string;
+  steps: AgentTaskStep[];
+}
+
+export interface AgentTask {
+  id: string;
+  repoId: string | null;
+  goal: string;           // alias for title in backend response
+  userPrompt: string;
+  status: AgentTaskStatus;
+  currentStepIndex: number;
+  totalSteps: number;
+  planJson: AgentTaskPlan | null;
+  planApprovalId: string | null;
+  error: string | null;
+  errorMessage: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  steps?: AgentTaskStep[];
+  memories?: AgentMemory[];
+}
+
+export interface CreateAgentTaskDto {
+  goal: string;
+  repoId?: string;
+  context?: string;
+  pathPrefix?: string;
 }
 
 export interface ChatSession {

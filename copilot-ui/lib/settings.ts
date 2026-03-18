@@ -4,6 +4,8 @@ export interface Settings {
   githubToken: string;
   activeRepoId: string;
   activeRepoName: string;
+  /** Optional subfolder to restrict AI search to (e.g. "backend/" or "src/"). */
+  activePathPrefix: string;
   apiUrl: string;
 }
 
@@ -13,6 +15,7 @@ const defaults: Settings = {
   githubToken: '',
   activeRepoId: process.env.NEXT_PUBLIC_REPO_ID ?? '',
   activeRepoName: '',
+  activePathPrefix: '',
   apiUrl: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000',
 };
 

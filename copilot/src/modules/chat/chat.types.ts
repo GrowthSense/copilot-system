@@ -17,9 +17,25 @@ export interface ChatAgentAction {
   data: Record<string, any>;
 }
 
+/** A single tool call made by the agent during a chat turn. */
+export interface ToolStep {
+  /** Machine name of the tool, e.g. "write_file", "run_tests". */
+  toolName: string;
+  /** Human-readable one-line description of what was done. */
+  label: string;
+  /** Arguments passed to the tool. */
+  input: Record<string, unknown>;
+  /** Raw JSON output from the tool (truncated for display). */
+  output: string;
+  /** Whether the tool call returned successfully (no error field in output). */
+  success: boolean;
+}
+
 export interface ChatOrchestratorResult {
   reply: string;
   relevantFiles: string[];
   sources: string[];
   agentAction?: ChatAgentAction;
+  /** Tool calls the agent made this turn — empty if no tools were used. */
+  toolSteps?: ToolStep[];
 }

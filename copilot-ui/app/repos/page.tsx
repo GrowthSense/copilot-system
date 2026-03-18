@@ -42,6 +42,7 @@ export default function ReposPage() {
   const [loading, setLoading] = useState(true);
   const [indexing, setIndexing] = useState<Record<string, boolean>>({});
   const [activeRepoId, setActiveRepoId] = useState('');
+  const [activePathPrefix, setActivePathPrefix] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', localPath: '', description: '' });
   const [submitting, setSubmitting] = useState(false);
@@ -49,9 +50,14 @@ export default function ReposPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ name: '', localPath: '', description: '' });
   const [editSaving, setEditSaving] = useState(false);
+  /** repoId → subfolder input value while the user is picking a path prefix */
+  const [prefixInput, setPrefixInput] = useState<Record<string, string>>({});
+  const [showPrefixFor, setShowPrefixFor] = useState<string | null>(null);
 
   useEffect(() => {
-    setActiveRepoId(loadSettings().activeRepoId);
+    const s = loadSettings();
+    setActiveRepoId(s.activeRepoId);
+    setActivePathPrefix(s.activePathPrefix ?? '');
     load();
   }, []);
 
@@ -123,9 +129,18 @@ export default function ReposPage() {
     }
   }
 
-  function handleSetActive(repo: Repo) {
-    saveSettings({ activeRepoId: repo.id, activeRepoName: repo.name });
+  function handleSetActive(repo: Repo, prefix?: string) {
+    const normalised = (prefix ?? '').trim().replace(/\/*$/, (m) => m ? '/' : '');
+    saveSettings({ activeRepoId: repo.id, activeRepoName: repo.name, activePathPrefix: normalised });
     setActiveRepoId(repo.id);
+    setActivePathPrefix(normalised);
+    setShowPrefixFor(null);
+  }
+
+  function handleDeactivate() {
+    saveSettings({ activeRepoId: '', activeRepoName: '', activePathPrefix: '' });
+    setActiveRepoId('');
+    setActivePathPrefix('');
   }
 
   function startEdit(repo: Repo) {
@@ -426,6 +441,14 @@ export default function ReposPage() {
                         ACTIVE
                       </span>
                     )}
+                    {isActive && activePathPrefix && (
+                      <span style={{
+                        fontSize: 10, padding: '1px 6px', borderRadius: 3,
+                        background: 'rgba(102,109,74,0.15)', color: '#666d4a', fontFamily: 'monospace',
+                      }}>
+                        {activePathPrefix}
+                      </span>
+                    )}
                     {index && <StatusBadge status={index.status} />}
                   </div>
                   <div style={{
@@ -444,9 +467,35 @@ export default function ReposPage() {
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                  {!isActive && (
-                    <button onClick={() => handleSetActive(repo)} title="Set as active repo for chat" style={iconBtn}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                  {showPrefixFor === repo.id ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        autoFocus
+                        style={{ ...inputStyle, width: 160, fontFamily: 'monospace', fontSize: 11, padding: '4px 8px' }}
+                        placeholder="subfolder/ (optional)"
+                        value={prefixInput[repo.id] ?? ''}
+                        onChange={(e) => setPrefixInput((p) => ({ ...p, [repo.id]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSetActive(repo, prefixInput[repo.id]);
+                          if (e.key === 'Escape') setShowPrefixFor(null);
+                        }}
+                      />
+                      <button onClick={() => handleSetActive(repo, prefixInput[repo.id])} title="Confirm" style={{ ...iconBtn, borderColor: '#666d4a' }}>
+                        <CheckCircle size={14} color="#666d4a" />
+                      </button>
+                      <button onClick={() => setShowPrefixFor(null)} title="Cancel" style={iconBtn}>
+                        <X size={14} color="var(--text-muted)" />
+                      </button>
+                    </div>
+                  ) : (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                  {isActive ? (
+                    <button onClick={handleDeactivate} title="Deactivate (clear active repo)" style={{ ...iconBtn, borderColor: 'rgba(131,79,27,0.4)' }}>
+                      <X size={14} color="var(--accent)" />
+                    </button>
+                  ) : (
+                    <button onClick={() => { setPrefixInput((p) => ({ ...p, [repo.id]: '' })); setShowPrefixFor(repo.id); }} title="Set as active repo for chat" style={iconBtn}>
                       <CheckCircle size={14} color="#666d4a" />
                     </button>
                   )}
@@ -467,6 +516,8 @@ export default function ReposPage() {
                   <button onClick={() => handleDelete(repo.id)} title="Remove project" style={iconBtn}>
                     <Trash2 size={14} color="#f87171" />
                   </button>
+                  </div>
+                  )}
                 </div>
               </div>
             );

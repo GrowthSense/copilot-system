@@ -1,18 +1,23 @@
-import { IsString, IsNotEmpty, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
 
 export class ChatRequestDto {
   @IsString()
   @IsNotEmpty()
   sessionId: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  repoId: string;
+  repoId?: string;
 
   @IsString()
   @IsNotEmpty()
   @MaxLength(4000)
   message: string;
+
+  /** Optional subfolder to restrict file search to (e.g. "backend/" or "src/api/"). */
+  @IsOptional()
+  @IsString()
+  pathPrefix?: string;
 }
 
 export class ChatResponseDto {
@@ -24,6 +29,9 @@ export class ChatResponseDto {
   durationMs: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   agentAction?: Record<string, any>;
+  /** Tool calls made by the agent this turn. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  toolSteps?: any[];
 }
 
 export class ChatErrorResponseDto {

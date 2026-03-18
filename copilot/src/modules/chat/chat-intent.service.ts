@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-export type ChatIntent = 'review' | 'generate_tests' | 'explain' | 'chat';
+export type ChatIntent = 'review' | 'generate_tests' | 'explain' | 'structure' | 'chat';
 
 @Injectable()
 export class ChatIntentService {
@@ -14,6 +14,7 @@ export class ChatIntentService {
     if (/\b(review|code\s*review|audit)\b/.test(lower)) return 'review';
     if (/\b(generate\s+tests?|write\s+tests?|create\s+tests?|add\s+tests?)\b/.test(lower)) return 'generate_tests';
     if (/\b(explain|describe|what\s+does|how\s+does)\b/.test(lower)) return 'explain';
+    if (/\b(folder|folders|directory|directories|structure|tree|file\s*list|list\s*files?|show\s*files?|what'?s?\s*in|what\s*files?)\b/.test(lower)) return 'structure';
 
     return 'chat';
   }

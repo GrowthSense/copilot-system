@@ -1,86 +1,67 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Message } from '@/lib/types';
+import { Message, ToolStep } from '@/lib/types';
 import MessageBubble from './MessageBubble';
-import { Zap } from 'lucide-react';
+import { Zap, CheckCircle, Loader } from 'lucide-react';
 
 interface Props {
   messages: Message[];
   loading: boolean;
+  liveSteps?: ToolStep[];
   onSend?: (text: string) => void;
 }
 
 const SUGGESTIONS = [
+  'Write tests for src/auth/auth.service.ts and run them',
+  'Find and fix the bug in the login flow',
   'Explain how this repo is structured',
-  'Find files related to authentication',
-  'What does the LLM service do?',
-  'Show me how runs are tracked',
+  'Create a new endpoint for user profile updates',
 ];
 
-const THINKING_STAGES = [
-  { label: 'Searching codebase…',   ms: 0 },
-  { label: 'Reading relevant files…', ms: 2500 },
-  { label: 'Thinking…',              ms: 6000 },
-  { label: 'Writing response…',      ms: 11000 },
-];
 
-function ThinkingIndicator() {
-  const [stageIndex, setStageIndex] = useState(0);
-
-  useEffect(() => {
-    setStageIndex(0);
-    const timers = THINKING_STAGES.slice(1).map((s, i) =>
-      setTimeout(() => setStageIndex(i + 1), s.ms),
-    );
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
-  const label = THINKING_STAGES[stageIndex].label;
-
+function LiveStepsIndicator({ steps }: { steps: ToolStep[] }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' }}>
-      {/* Pulsing dots */}
-      <div style={{ display: 'flex', gap: 4 }}>
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: 'var(--accent)',
-              animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
-            }}
-          />
-        ))}
-      </div>
-      {/* Stage label */}
-      <span
-        key={label}
-        style={{
-          fontSize: 12,
-          color: 'var(--text-muted)',
-          animation: 'fadeIn 0.3s ease',
-        }}
-      >
-        {label}
-      </span>
+    <div style={{ padding: '10px 14px', minWidth: 220 }}>
+      {steps.length === 0 ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {[0, 1, 2].map((i) => (
+              <div key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite` }} />
+            ))}
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Thinking…</span>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {steps.map((step, i) => {
+            const isLast = i === steps.length - 1;
+            const inProgress = isLast && !step.output;
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, animation: 'fadeIn 0.2s ease' }}>
+                {inProgress ? (
+                  <Loader size={12} color="var(--accent)" style={{ flexShrink: 0, animation: 'spin 1s linear infinite' }} />
+                ) : (
+                  <CheckCircle size={12} color={step.success ? '#4ade80' : '#f87171'} style={{ flexShrink: 0 }} />
+                )}
+                <span style={{ fontSize: 12, color: inProgress ? 'var(--text-subtle)' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 260 }}>
+                  {step.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <style>{`
-        @keyframes bounce {
-          0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-          30% { transform: translateY(-5px); opacity: 1; }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(3px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-5px); opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </div>
   );
 }
 
-export default function ChatWindow({ messages, loading, onSend }: Props) {
+export default function ChatWindow({ messages, loading, liveSteps = [], onSend }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -183,21 +164,9 @@ export default function ChatWindow({ messages, loading, onSend }: Props) {
         <MessageBubble key={msg.id} message={msg} />
       ))}
       {loading && (
-        <div
-          style={{
-            display: 'flex',
-            padding: '6px 20px',
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-message)',
-              border: '1px solid var(--border)',
-              borderRadius: 10,
-              borderTopLeftRadius: 2,
-            }}
-          >
-            <ThinkingIndicator />
+        <div style={{ display: 'flex', padding: '6px 20px' }}>
+          <div style={{ background: 'var(--bg-message)', border: '1px solid var(--border)', borderRadius: 10, borderTopLeftRadius: 2 }}>
+            <LiveStepsIndicator steps={liveSteps} />
           </div>
         </div>
       )}

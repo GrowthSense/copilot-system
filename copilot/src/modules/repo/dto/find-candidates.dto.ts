@@ -13,4 +13,12 @@ export class FindCandidatesDto {
   @Min(1)
   @Max(50)
   topK?: number = 10;
+
+  /**
+   * Optional path prefix filter (e.g. "backend/" or "src/").
+   * When set, only files whose filePath starts with this prefix are searched.
+   */
+  @IsOptional()
+  @IsString()
+  pathPrefix?: string;
 }

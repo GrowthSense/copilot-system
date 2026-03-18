@@ -26,14 +26,18 @@ export class RepoMapService {
    * Builds a hierarchical directory tree of all INDEXED files in the repo.
    * File paths use forward slashes; the tree mirrors the directory structure.
    */
-  async getDirectoryTree(repoId: string): Promise<DirectoryNode> {
+  async getDirectoryTree(repoId: string, pathPrefix?: string): Promise<DirectoryNode> {
     const files = await this.db.repoFile.findMany({
-      where: { repoId, status: RepoFileStatus.INDEXED },
+      where: {
+        repoId,
+        status: RepoFileStatus.INDEXED,
+        ...(pathPrefix ? { filePath: { startsWith: pathPrefix } } : {}),
+      },
       select: { filePath: true, fileName: true, language: true, sizeBytes: true },
       orderBy: { filePath: 'asc' },
     });
 
-    return this.buildTree(files, repoId);
+    return this.buildTree(files, pathPrefix || repoId);
   }
 
   /**

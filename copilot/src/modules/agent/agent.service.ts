@@ -14,6 +14,9 @@ import { ReviewCodeDto } from './dto/review-code.dto';
 import { ReviewCodeResponseDto } from './dto/review-code-response.dto';
 import { RunTestsAgentDto } from './dto/run-tests-agent.dto';
 import { RunTestsAgentResponseDto } from './dto/run-tests-agent-response.dto';
+import { WriteAndRunTestDto } from './dto/write-and-run-test.dto';
+import { ScaffoldProjectDto } from './dto/scaffold-project.dto';
+import { ScaffoldProjectResponseDto } from './dto/scaffold-project-response.dto';
 import { AgentRunResponseDto } from './dto/agent-run-response.dto';
 import { AskRepoQuestionResponseDto } from './dto/ask-repo-question-response.dto';
 import { FindRelevantFilesResponseDto } from './dto/find-relevant-files-response.dto';
@@ -75,6 +78,16 @@ export class AgentService {
   async runTests(dto: RunTestsAgentDto): Promise<RunTestsAgentResponseDto> {
     this.logger.log(`runTests: repoId=${dto.repoId} testgenId=${dto.testgenId}`);
     return this.orchestrator.runTests(dto);
+  }
+
+  async writeAndRunTest(dto: WriteAndRunTestDto): Promise<RunTestsAgentResponseDto> {
+    this.logger.log(`writeAndRunTest: repoId=${dto.repoId} testgenId=${dto.testgenId}`);
+    return this.orchestrator.writeAndRunTest(dto);
+  }
+
+  async scaffoldProject(dto: ScaffoldProjectDto): Promise<ScaffoldProjectResponseDto> {
+    this.logger.log(`scaffoldProject: project=${dto.projectName} outputDir=${dto.outputDir}`);
+    return this.orchestrator.scaffoldProject(dto);
   }
 
   // ─── Run management (legacy + utilities) ─────────────────────────────────

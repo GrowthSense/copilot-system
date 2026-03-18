@@ -7,11 +7,19 @@ interface Props {
   onSend: (text: string) => void;
   onStop: () => void;
   disabled: boolean;
+  initialValue?: string;
 }
 
-export default function ChatInput({ onSend, onStop, disabled }: Props) {
-  const [value, setValue] = useState('');
+export default function ChatInput({ onSend, onStop, disabled, initialValue }: Props) {
+  const [value, setValue] = useState(initialValue ?? '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (initialValue) {
+      setValue(initialValue);
+      textareaRef.current?.focus();
+    }
+  }, [initialValue]);
 
   // Auto-grow
   useEffect(() => {

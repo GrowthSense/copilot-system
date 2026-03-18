@@ -1,4 +1,4 @@
-import { ChatApiResponse, ApiEnvelope, Repo, RepoIndex, KnowledgeSource, IngestResult, ChatSession, ChatSessionMessage, AuthResponse, CodeReview, GeneratedTestResult, ApprovalRequest, TestRunResult } from './types';
+import { ChatApiResponse, ApiEnvelope, Repo, RepoIndex, KnowledgeSource, IngestResult, ChatSession, ChatSessionMessage, AuthResponse, CodeReview, GeneratedTestResult, ApprovalRequest, TestRunResult, AgentTask, AgentMemory, CreateAgentTaskDto } from './types';
 import { loadSettings } from './settings';
 import { getToken } from './auth';
 
@@ -33,14 +33,80 @@ export async function sendChatMessage(
   repoId: string,
   message: string,
   signal?: AbortSignal,
+  pathPrefix?: string,
 ): Promise<ChatApiResponse> {
   const res = await fetch(`${getApiUrl()}/api/v1/chat`, {
     method: 'POST',
     headers: baseHeaders(),
-    body: JSON.stringify({ sessionId, repoId, message }),
+    body: JSON.stringify({ sessionId, repoId, message, ...(pathPrefix ? { pathPrefix } : {}) }),
     signal,
   });
   return unwrap<ChatApiResponse>(res);
+}
+
+export interface StreamProgressEvent {
+  type: 'tool_start' | 'tool_done' | 'done' | 'error';
+  toolName?: string;
+  label?: string;
+  input?: Record<string, unknown>;
+  output?: string;
+  success?: boolean;
+  // done event fields
+  reply?: string;
+  relevantFiles?: string[];
+  sources?: string[];
+  toolSteps?: import('./types').ToolStep[];
+  runId?: string;
+  sessionId?: string;
+  durationMs?: number;
+  // error event
+  message?: string;
+}
+
+export async function sendChatMessageStream(
+  sessionId: string,
+  repoId: string,
+  message: string,
+  onEvent: (event: StreamProgressEvent) => void,
+  signal?: AbortSignal,
+  pathPrefix?: string,
+): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/api/v1/chat/stream`, {
+    method: 'POST',
+    headers: baseHeaders(),
+    body: JSON.stringify({ sessionId, repoId, message, ...(pathPrefix ? { pathPrefix } : {}) }),
+    signal,
+  });
+
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => 'Request failed');
+    throw new Error(text);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE events are separated by \n\n; each line is "data: <json>"
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() ?? '';
+
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const event: StreamProgressEvent = JSON.parse(line.slice(6));
+        onEvent(event);
+      } catch {
+        // malformed event — ignore
+      }
+    }
+  }
 }
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
@@ -271,6 +337,20 @@ export async function runGeneratedTests(data: {
   return unwrap<TestRunResult>(res);
 }
 
+export async function writeAndRunTest(data: {
+  repoId: string;
+  testgenId: string;
+  script?: 'test' | 'test:cov';
+  timeoutMs?: number;
+}): Promise<TestRunResult> {
+  const res = await fetch(`${getApiUrl()}/api/v1/agent/write-and-run-test`, {
+    method: 'POST',
+    headers: baseHeaders(),
+    body: JSON.stringify(data),
+  });
+  return unwrap<TestRunResult>(res);
+}
+
 export async function getTestRunHistory(testgenId: string): Promise<TestRunResult[]> {
   const res = await fetch(
     `${getApiUrl()}/api/v1/testgen/${testgenId}/runs`,
@@ -316,4 +396,74 @@ export async function rejectRequest(id: string, reviewedBy = 'user', reviewNotes
 export async function getPendingApprovals(): Promise<ApprovalRequest[]> {
   const res = await fetch(`${getApiUrl()}/api/v1/approvals/pending`, { headers: baseHeaders() });
   return unwrap<ApprovalRequest[]>(res);
+}
+
+// ─── Agent Tasks ──────────────────────────────────────────────────────────────
+
+export async function createAgentTask(dto: CreateAgentTaskDto): Promise<AgentTask> {
+  const res = await fetch(`${getApiUrl()}/api/v1/agent-tasks`, {
+    method: 'POST',
+    headers: baseHeaders(),
+    body: JSON.stringify(dto),
+  });
+  return unwrap<AgentTask>(res);
+}
+
+export async function listAgentTasks(repoId?: string, status?: string): Promise<AgentTask[]> {
+  const params = new URLSearchParams();
+  if (repoId) params.set('repoId', repoId);
+  if (status) params.set('status', status);
+  const qs = params.toString();
+  const res = await fetch(`${getApiUrl()}/api/v1/agent-tasks${qs ? `?${qs}` : ''}`, {
+    headers: baseHeaders(),
+  });
+  return unwrap<AgentTask[]>(res);
+}
+
+export async function getAgentTask(id: string): Promise<AgentTask> {
+  const res = await fetch(`${getApiUrl()}/api/v1/agent-tasks/${id}`, { headers: baseHeaders() });
+  return unwrap<AgentTask>(res);
+}
+
+export async function approvePlan(taskId: string): Promise<AgentTask> {
+  const res = await fetch(`${getApiUrl()}/api/v1/agent-tasks/${taskId}/approve-plan`, {
+    method: 'POST',
+    headers: baseHeaders(),
+  });
+  return unwrap<AgentTask>(res);
+}
+
+export async function resumeAgentTask(taskId: string): Promise<AgentTask> {
+  const res = await fetch(`${getApiUrl()}/api/v1/agent-tasks/${taskId}/resume`, {
+    method: 'POST',
+    headers: baseHeaders(),
+  });
+  return unwrap<AgentTask>(res);
+}
+
+export async function cancelAgentTask(taskId: string): Promise<AgentTask> {
+  const res = await fetch(`${getApiUrl()}/api/v1/agent-tasks/${taskId}/cancel`, {
+    method: 'DELETE',
+    headers: baseHeaders(),
+  });
+  return unwrap<AgentTask>(res);
+}
+
+export async function listMemories(repoId?: string, type?: string): Promise<AgentMemory[]> {
+  const params = new URLSearchParams();
+  if (repoId) params.set('repoId', repoId);
+  if (type) params.set('type', type);
+  const qs = params.toString();
+  const res = await fetch(`${getApiUrl()}/api/v1/agent-tasks/memories/list${qs ? `?${qs}` : ''}`, {
+    headers: baseHeaders(),
+  });
+  return unwrap<AgentMemory[]>(res);
+}
+
+export async function deleteMemory(id: string): Promise<void> {
+  const res = await fetch(`${getApiUrl()}/api/v1/agent-tasks/memories/${id}`, {
+    method: 'DELETE',
+    headers: baseHeaders(),
+  });
+  await unwrap(res);
 }

@@ -8,4 +8,5 @@ export enum RunType {
   REVIEW_CODE = 'REVIEW_CODE',
   RUN_TESTS = 'RUN_TESTS',
   CHAT = 'CHAT',
+  SCAFFOLD_PROJECT = 'SCAFFOLD_PROJECT',
 }

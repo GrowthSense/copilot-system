@@ -29,6 +29,7 @@ enum RunType {
   REVIEW_CODE
   RUN_TESTS
   CHAT
+  SCAFFOLD_PROJECT
 }
 
 enum StepStatus {
@@ -90,6 +91,43 @@ enum AuditAction {
   KNOWLEDGE_SOURCE_INGESTED
   KNOWLEDGE_SOURCE_DELETED
   REPO_INDEXED
+  TASK_CREATED
+  TASK_PLAN_APPROVED
+  TASK_PLAN_REJECTED
+  TASK_STEP_APPROVED
+  TASK_COMPLETED
+  TASK_FAILED
+  MEMORY_WRITTEN
+  WEB_SEARCH_EXECUTED
+}
+
+enum AgentTaskStatus {
+  AWAITING_PLAN_APPROVAL
+  PLAN_APPROVED
+  PLAN_REJECTED
+  RUNNING
+  AWAITING_STEP_APPROVAL
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AgentTaskStepStatus {
+  PENDING
+  AWAITING_APPROVAL
+  APPROVED
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+enum AgentMemoryType {
+  FACT
+  OBSERVATION
+  DECISION
+  INSIGHT
+  RESEARCH
 }
 
 enum LlmProvider {
@@ -135,10 +173,12 @@ model Repo {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  documents KnowledgeDocument[]
-  runs      AgentRun[]
-  indexes   RepoIndex[]
-  files     RepoFile[]
+  documents   KnowledgeDocument[]
+  runs        AgentRun[]
+  indexes     RepoIndex[]
+  files       RepoFile[]
+  agentTasks  AgentTask[]
+  memories    AgentMemory[]
 
   @@map("repos")
 }
@@ -450,10 +490,13 @@ model ApprovalRequest {
   updatedAt   DateTime       @updatedAt
   reviewedAt  DateTime?
 
-  run     AgentRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
-  patch   PatchProposal?    @relation(fields: [patchId], references: [id], onDelete: SetNull)
-  prDraft PullRequestDraft? @relation(fields: [prDraftId], references: [id], onDelete: SetNull)
-  testgen GeneratedTest?    @relation(fields: [testgenId], references: [id], onDelete: SetNull)
+  run       AgentRun?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  patch     PatchProposal?    @relation(fields: [patchId], references: [id], onDelete: SetNull)
+  prDraft   PullRequestDraft? @relation(fields: [prDraftId], references: [id], onDelete: SetNull)
+  testgen   GeneratedTest?    @relation(fields: [testgenId], references: [id], onDelete: SetNull)
+  agentTask AgentTask?        @relation(fields: [agentTaskId], references: [id], onDelete: SetNull)
+
+  agentTaskId String?
 
   @@index([status])
   @@index([runId])
@@ -591,4 +634,95 @@ model ChatMessage {
   @@index([sessionId])
   @@index([sessionId, createdAt])
   @@map("chat_messages")
+}
+
+// ── Hybrid Agent Task models ──────────────────────────────────────────────────
+
+model AgentTask {
+  id               String          @id @default(cuid())
+  repoId           String?
+  title            String
+  userPrompt       String
+  status           AgentTaskStatus @default(AWAITING_PLAN_APPROVAL)
+  planJson         Json?
+  planApprovalId   String?
+  planApprovedAt   DateTime?
+  planRejectedAt   DateTime?
+  currentStepIndex Int             @default(0)
+  totalSteps       Int             @default(0)
+  error            String?
+  output           Json?
+  durationMs       Int?
+  promptTokens     Int?
+  completionTokens Int?
+  metadata         Json            @default("{}")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  startedAt        DateTime?
+  completedAt      DateTime?
+
+  repo      Repo?             @relation(fields: [repoId], references: [id], onDelete: SetNull)
+  steps     AgentTaskStep[]
+  memories  AgentMemory[]
+  approvals ApprovalRequest[]
+
+  @@index([repoId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("agent_tasks")
+}
+
+model AgentTaskStep {
+  id               String              @id @default(cuid())
+  taskId           String
+  stepIndex        Int
+  title            String
+  description      String
+  toolName         String?
+  toolInput        Json?
+  toolOutput       Json?
+  requiresApproval Boolean             @default(false)
+  approvalId       String?
+  status           AgentTaskStepStatus @default(PENDING)
+  reflectionJson   Json?
+  replanRequired   Boolean             @default(false)
+  error            String?
+  durationMs       Int?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  startedAt        DateTime?
+  completedAt      DateTime?
+
+  task AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, stepIndex])
+  @@index([taskId])
+  @@index([taskId, status])
+  @@map("agent_task_steps")
+}
+
+model AgentMemory {
+  id         String          @id @default(cuid())
+  repoId     String?
+  taskId     String?
+  type       AgentMemoryType
+  subject    String
+  content    String
+  confidence Float           @default(1.0)
+  sourceUrl  String?
+  tags       String[]        @default([])
+  expiresAt  DateTime?
+  isActive   Boolean         @default(true)
+  metadata   Json            @default("{}")
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  repo Repo?      @relation(fields: [repoId], references: [id], onDelete: SetNull)
+  task AgentTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([repoId])
+  @@index([repoId, type])
+  @@index([type])
+  @@index([isActive])
+  @@map("agent_memories")
 }

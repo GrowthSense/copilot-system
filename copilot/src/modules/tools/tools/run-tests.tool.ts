@@ -15,6 +15,11 @@ export interface RunTestsInput {
    * Default: "test"
    */
   script?: 'test' | 'test:cov' | 'test:e2e' | 'test:watch';
+  /**
+   * When set, only this test file is executed via --testPathPattern.
+   * Relative path from the repo root (e.g. "src/auth/auth.service.spec.ts").
+   */
+  testFile?: string;
   /** Optional sub-directory within the repo to run from (e.g. "packages/api"). */
   subDirectory?: string;
   /** Timeout in milliseconds. Default: 120 000. Hard max: 300 000. */
@@ -91,11 +96,24 @@ export class RunTestsTool implements IAgentTool<RunTestsInput, RunTestsOutput> {
 
     assertWithinRepoRoot(cwd, repoRoot);
 
-    this.logger.log(`[run_tests] repo=${input.repoId} cwd=${cwd} script=${script}`);
+    // When a specific test file is provided, run only that file via --testPathPattern.
+    // Escape regex special chars in the path so jest treats it literally.
+    const args = input.testFile
+      ? [
+          'run', script, '--',
+          `--testPathPattern=${input.testFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+          '--forceExit',
+          '--passWithNoTests',
+        ]
+      : ['run', script];
+
+    this.logger.log(
+      `[run_tests] repo=${input.repoId} cwd=${cwd} script=${script}${input.testFile ? ` file=${input.testFile}` : ''}`,
+    );
 
     const result = await runShellCommand({
       executable: 'npm',
-      args: ['run', script],
+      args,
       cwd,
       timeoutMs: input.timeoutMs,
     });

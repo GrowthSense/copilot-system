@@ -159,11 +159,11 @@ export default function ChatSidebar({ repoId, activeSessionId, sessionsVersion, 
                     if (!isActive) e.currentTarget.style.background = 'transparent';
                   }}
                 >
-                  <MessageSquare size={12} color={isActive ? 'var(--accent)' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: isActive ? 'var(--text-primary)' : 'var(--text-subtle)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+                  <MessageSquare size={12} color={isActive ? '#fff' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: isActive ? '#fff' : 'var(--text-subtle)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
                     {s.title}
                   </span>
-                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: isActive ? 'rgba(255,255,255,0.65)' : 'var(--text-muted)', flexShrink: 0 }}>
                     {formatTime(s.updatedAt)}
                   </span>
                 </button>

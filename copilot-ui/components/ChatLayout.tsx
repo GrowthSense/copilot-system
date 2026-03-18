@@ -1,6 +1,6 @@
 'use client';
 
-import { Message } from '@/lib/types';
+import { Message, ToolStep } from '@/lib/types';
 import ChatSidebar from './ChatSidebar';
 import ChatWindow from './ChatWindow';
 import ChatInput from './ChatInput';
@@ -9,6 +9,7 @@ import { Bot } from 'lucide-react';
 interface Props {
   messages: Message[];
   loading: boolean;
+  liveSteps?: ToolStep[];
   onSend: (text: string) => void;
   onStop: () => void;
   repoId: string;
@@ -17,11 +18,13 @@ interface Props {
   sessionsVersion: number;
   onSelectSession: (sessionId: string) => void;
   onNewSession: () => void;
+  initialMessage?: string;
 }
 
 export default function ChatLayout({
   messages,
   loading,
+  liveSteps,
   onSend,
   onStop,
   repoId,
@@ -30,6 +33,7 @@ export default function ChatLayout({
   sessionsVersion,
   onSelectSession,
   onNewSession,
+  initialMessage,
 }: Props) {
   return (
     <div
@@ -85,10 +89,10 @@ export default function ChatLayout({
         </div>
 
         {/* Messages */}
-        <ChatWindow messages={messages} loading={loading} onSend={onSend} />
+        <ChatWindow messages={messages} loading={loading} liveSteps={liveSteps} onSend={onSend} />
 
         {/* Input */}
-        <ChatInput onSend={onSend} onStop={onStop} disabled={loading} />
+        <ChatInput onSend={onSend} onStop={onStop} disabled={loading} initialValue={initialMessage} />
       </div>
     </div>
   );

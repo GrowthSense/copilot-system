@@ -8,6 +8,12 @@ import { GrepCodeTool } from './tools/grep-code.tool';
 import { GenerateDiffTool } from './tools/generate-diff.tool';
 import { RunTestsTool } from './tools/run-tests.tool';
 import { RunLintTool } from './tools/run-lint.tool';
+import { WriteFileTool } from './tools/write-file.tool';
+import { CreateDirectoryTool } from './tools/create-directory.tool';
+import { RunCommandTool } from './tools/run-command.tool';
+import { ScaffoldProjectTool } from './tools/scaffold-project.tool';
+import { WebFetchTool } from './tools/web-fetch.tool';
+import { CheckEnvironmentTool } from './tools/check-environment.tool';
 
 @Injectable()
 export class ToolsRegistry {
@@ -22,8 +28,15 @@ export class ToolsRegistry {
     private readonly generateDiff: GenerateDiffTool,
     private readonly runTests: RunTestsTool,
     private readonly runLint: RunLintTool,
+    private readonly writeFile: WriteFileTool,
+    private readonly createDirectory: CreateDirectoryTool,
+    private readonly runCommand: RunCommandTool,
+    private readonly scaffoldProject: ScaffoldProjectTool,
+    private readonly webFetch: WebFetchTool,
+    private readonly checkEnvironment: CheckEnvironmentTool,
   ) {
     this.tools = new Map<string, IAgentTool>([
+      [checkEnvironment.name, checkEnvironment],
       [searchFiles.name, searchFiles],
       [readFile.name, readFile],
       [readFiles.name, readFiles],
@@ -32,6 +45,11 @@ export class ToolsRegistry {
       [generateDiff.name, generateDiff],
       [runTests.name, runTests],
       [runLint.name, runLint],
+      [writeFile.name, writeFile],
+      [createDirectory.name, createDirectory],
+      [runCommand.name, runCommand],
+      [scaffoldProject.name, scaffoldProject],
+      [webFetch.name, webFetch],
     ]);
   }
 

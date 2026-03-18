@@ -11,6 +11,12 @@ import { GrepCodeTool } from './tools/grep-code.tool';
 import { GenerateDiffTool } from './tools/generate-diff.tool';
 import { RunTestsTool } from './tools/run-tests.tool';
 import { RunLintTool } from './tools/run-lint.tool';
+import { WriteFileTool } from './tools/write-file.tool';
+import { CreateDirectoryTool } from './tools/create-directory.tool';
+import { RunCommandTool } from './tools/run-command.tool';
+import { ScaffoldProjectTool } from './tools/scaffold-project.tool';
+import { WebFetchTool } from './tools/web-fetch.tool';
+import { CheckEnvironmentTool } from './tools/check-environment.tool';
 
 // Framework
 import { ToolsRegistry } from './tools.registry';
@@ -34,11 +40,17 @@ import { ToolsController } from './tools.controller';
     GenerateDiffTool,
     RunTestsTool,
     RunLintTool,
+    WriteFileTool,
+    CreateDirectoryTool,
+    RunCommandTool,
+    ScaffoldProjectTool,
+    WebFetchTool,
+    CheckEnvironmentTool,
     // Framework
     ToolsRegistry,
     ToolsExecutor,
     ToolsService,
   ],
-  exports: [ToolsService, ToolsRegistry, ToolsExecutor, RunTestsTool],
+  exports: [ToolsService, ToolsRegistry, ToolsExecutor, RunTestsTool, WriteFileTool, CreateDirectoryTool, RunCommandTool, ScaffoldProjectTool, WebFetchTool, CheckEnvironmentTool],
 })
 export class ToolsModule {}

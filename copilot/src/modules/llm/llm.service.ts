@@ -5,6 +5,7 @@ import { ILlmProvider } from './interfaces/llm-provider.interface';
 import {
   LlmMessage,
   LlmCompletionResponse,
+  LlmToolDefinition,
   StructuredCompletionOptions,
 } from './interfaces/llm-completion.interface';
 import { LLM_PROVIDER_TOKEN } from './providers/llm-provider.token';
@@ -19,6 +20,10 @@ import { ProposePatchInput, ProposePatchOutput, ProposePatchOutputSchema } from 
 import { GenerateTestsInput, GenerateTestsOutput, GenerateTestsOutputSchema } from './schemas/generate-tests.schema';
 import { CreatePrDraftInput, CreatePrDraftOutput, CreatePrDraftOutputSchema } from './schemas/create-pr-draft.schema';
 import { ReviewCodeInput, ReviewCodeOutput, ReviewCodeOutputSchema } from './schemas/review-code.schema';
+import { ScaffoldPlanInput, ScaffoldPlanOutput, ScaffoldPlanOutputSchema } from './schemas/scaffold-project.schema';
+import { TaskPlanInput, TaskPlanOutput, TaskPlanOutputSchema } from './schemas/task-plan.schema';
+import { ReflectInput, ReflectOutput, ReflectOutputSchema } from './schemas/reflect-output.schema';
+import { InsightInput, InsightOutput, InsightOutputSchema } from './schemas/insight-output.schema';
 
 @Injectable()
 export class LlmService {
@@ -126,6 +131,53 @@ export class LlmService {
     this.logger.log(`reviewCode: file=${input.filePath}`);
     const messages = this.promptBuilder.buildReviewCode(input);
     return this.completeStructured(messages, ReviewCodeOutputSchema);
+  }
+
+  async planScaffold(input: ScaffoldPlanInput): Promise<ScaffoldPlanOutput> {
+    this.logger.log(`planScaffold: project=${input.projectName}`);
+    const messages = this.promptBuilder.buildScaffoldProject(input);
+    return this.completeStructured(messages, ScaffoldPlanOutputSchema);
+  }
+
+  async planTask(input: TaskPlanInput): Promise<TaskPlanOutput> {
+    this.logger.log(`planTask: repo=${input.repoName ?? 'global'}`);
+    const messages = this.promptBuilder.buildTaskPlan(input);
+    return this.completeStructured(messages, TaskPlanOutputSchema);
+  }
+
+  async reflectOnStep(input: ReflectInput): Promise<ReflectOutput> {
+    this.logger.log(`reflectOnStep: step="${input.step.title}"`);
+    const messages = this.promptBuilder.buildReflect(input);
+    return this.completeStructured(messages, ReflectOutputSchema);
+  }
+
+  async extractInsights(input: InsightInput): Promise<InsightOutput> {
+    this.logger.log(`extractInsights: task="${input.taskSummary}"`);
+    const messages = this.promptBuilder.buildInsight(input);
+    return this.completeStructured(messages, InsightOutputSchema);
+  }
+
+  /**
+   * Completion with native tool calling.
+   * The model may return tool_calls in the response; call this in a loop
+   * (ReactEngine handles the loop — use completeText/completeStructured for
+   * one-shot calls).
+   */
+  async completeWithTools(
+    messages: LlmMessage[],
+    tools: LlmToolDefinition[],
+    options?: StructuredCompletionOptions,
+  ): Promise<LlmCompletionResponse> {
+    this.guardrails.assertMessagesNotEmpty(messages);
+    this.guardrails.assertContextWithinBudget(messages, this.config.llmMaxContextTokens);
+
+    return this.provider.complete({
+      messages,
+      tools,
+      model: options?.model,
+      maxTokens: options?.maxTokens,
+      temperature: options?.temperature,
+    });
   }
 
   /**

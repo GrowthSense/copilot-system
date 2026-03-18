@@ -1,26 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { LlmService } from '../llm/llm.service';
 import { LlmMessage } from '../llm/interfaces/llm-completion.interface';
-import { RetrievalService } from '../knowledge/retrieval.service';
-import { RepoSearchService } from '../repo/repo-search.service';
 import { RepoService } from '../repo/repo.service';
 import { ChatMemoryService } from './chat.memory.service';
-import { ChatIntentService } from './chat-intent.service';
-import { AgentService } from '../agent/agent.service';
-import { ChatMessage, ChatOrchestratorResult } from './chat.types';
-import { ChunkResult } from '../knowledge/interfaces/knowledge-source.interface';
-import { FileMatchResult } from '../repo/interfaces/repo-index.interface';
-import { ReviewCodeOutput } from '../llm/schemas/review-code.schema';
-import { GenerateTestsOutput } from '../llm/schemas/generate-tests.schema';
-
-/** Maximum files fetched and read from the repo per chat turn. */
-const MAX_FILES = 5;
-/** Maximum lines per file sent to the LLM. */
-const MAX_FILE_LINES = 150;
-/** Maximum characters per file sent to the LLM (~1 500 tokens). */
-const MAX_FILE_CHARS = 6_000;
-/** Number of knowledge chunks retrieved per turn. */
-const MAX_KNOWLEDGE_CHUNKS = 5;
+import { ReactEngine, ReactProgressEvent } from '../agent/react-engine.service';
+import { ToolsRegistry } from '../tools/tools.registry';
+import { WebResearchTool } from '../web-research/web-research.tool';
+import { ChatMessage, ChatOrchestratorResult, ToolStep } from './chat.types';
 
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
@@ -29,257 +14,250 @@ export class ChatOrchestrator {
   private readonly logger = new Logger(ChatOrchestrator.name);
 
   constructor(
-    private readonly llm: LlmService,
-    private readonly retrieval: RetrievalService,
-    private readonly repoSearch: RepoSearchService,
     private readonly repoService: RepoService,
     private readonly memory: ChatMemoryService,
-    private readonly intentService: ChatIntentService,
-    private readonly agentService: AgentService,
+    private readonly reactEngine: ReactEngine,
+    private readonly toolsRegistry: ToolsRegistry,
+    private readonly webResearchTool: WebResearchTool,
   ) {}
 
   /**
-   * Execute a single chat turn:
-   *  1. Load session history
-   *  2. Search repo + retrieve knowledge in parallel
-   *  3. Read top file contents
-   *  4. Build messages with context
-   *  5. Call LLM with structured output schema
-   *  6. Return typed result
+   * Execute a single agentic chat turn.
+   *
+   * The LLM has access to ALL tools — it can read any file, write files,
+   * run tests, run commands, search the web, and self-correct on errors.
+   * It loops until it has a final answer or exhausts tool iterations.
    */
   async chat(
     sessionId: string,
     repoId: string,
     message: string,
     repoName: string,
+    pathPrefix?: string,
   ): Promise<ChatOrchestratorResult> {
-    const intent = this.intentService.detectIntent(message);
-    const filePath = this.intentService.extractFilePath(message);
-
-    // ── Intent: code review ─────────────────────────────────────────────────
-    if (intent === 'review' && filePath) {
-      try {
-        const reviewResult = await this.agentService.review({ repoId, filePath });
-        const reply = this.formatReviewAsMarkdown(reviewResult);
-        return {
-          reply,
-          relevantFiles: [filePath],
-          sources: [],
-          agentAction: { type: 'review', data: reviewResult },
-        };
-      } catch (err: unknown) {
-        this.logger.warn(`[ChatOrchestrator] review intent failed, falling back to chat: ${toMessage(err)}`);
-      }
-    }
-
-    // ── Intent: generate tests ──────────────────────────────────────────────
-    if (intent === 'generate_tests' && filePath) {
-      try {
-        const testResult = await this.agentService.generateTests({ repoId, filePath });
-        const reply = this.formatTestgenAsMarkdown(testResult);
-        return {
-          reply,
-          relevantFiles: [filePath],
-          sources: [],
-          agentAction: { type: 'generate_tests', data: testResult },
-        };
-      } catch (err: unknown) {
-        this.logger.warn(`[ChatOrchestrator] generate_tests intent failed, falling back to chat: ${toMessage(err)}`);
-      }
-    }
-
-    // ── Fallback: conversational chat ───────────────────────────────────────
+    // Load prior conversation turns for multi-turn context
     const history = await this.memory.getContextWindow(sessionId);
+    const priorHistory = history.map((m: ChatMessage) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }));
 
-    const [candidates, chunks] = await Promise.all([
-      this.findRepoFiles(repoId, message),
-      this.retrieveKnowledge(message),
-    ]);
+    // All tools — registry tools + web_research
+    const tools = [
+      ...this.toolsRegistry.getAll(),
+      this.webResearchTool,
+    ];
 
-    const fileContents = await this.readFileContents(repoId, candidates);
+    const systemPrompt = buildAgentSystemPrompt(repoName, pathPrefix);
 
-    this.logger.debug(
-      `[ChatOrchestrator] sessionId="${sessionId}" files=${fileContents.length} chunks=${chunks.length}`,
+    this.logger.log(
+      `[ChatOrchestrator] session="${sessionId}" repo="${repoName}" tools=${tools.length} history=${priorHistory.length}`,
     );
 
-    const messages = this.buildMessages(repoName, history, message, fileContents, chunks);
-    const reply = await this.llm.completeText(messages);
+    const result = await this.reactEngine.run({
+      systemPrompt,
+      userMessage: message,
+      tools,
+      repoId,
+      priorHistory,
+      maxIterations: 25,
+    });
+
+    // Extract tool steps from the ReactEngine history for the UI
+    const toolSteps = extractToolSteps(result.history);
+
+    // Collect file paths that were read/written this turn
+    const relevantFiles = extractTouchedFiles(result.history);
 
     return {
-      reply,
-      relevantFiles: fileContents.map((f) => f.filePath),
-      sources: chunks.map((c) => c.sourceTitle).filter((t, i, a) => a.indexOf(t) === i),
+      reply: result.answer || "I wasn't able to complete that — please try rephrasing.",
+      relevantFiles,
+      sources: [],
+      toolSteps,
     };
   }
 
-  // ─── Intent formatting helpers ──────────────────────────────────────────────
-
-  private formatReviewAsMarkdown(result: { filePath: string; summary: string; overallRisk: string; findings: ReviewCodeOutput['findings']; positives: string[]; testingRecommendations: string[] }): string {
-    const riskEmoji: Record<string, string> = { CRITICAL: '🔴', HIGH: '🟠', MEDIUM: '🟡', LOW: '🔵', NONE: '🟢' };
-    const icon = riskEmoji[result.overallRisk] ?? '⚪';
-    const lines: string[] = [
-      `## ${icon} Code Review: \`${result.filePath}\``,
-      '',
-      `**Overall Risk:** ${result.overallRisk}`,
-      '',
-      result.summary,
-    ];
-
-    if (result.findings.length > 0) {
-      lines.push('', '### Findings');
-      for (const f of result.findings) {
-        const sevIcon = riskEmoji[f.severity] ?? '⚪';
-        const loc = f.lineStart ? ` (line ${f.lineStart}${f.lineEnd && f.lineEnd !== f.lineStart ? `–${f.lineEnd}` : ''})` : '';
-        lines.push('', `**${sevIcon} [${f.severity}] ${f.title}**${loc}`);
-        lines.push(f.description);
-        lines.push(`> 💡 ${f.suggestion}`);
-      }
-    }
-
-    if (result.positives.length > 0) {
-      lines.push('', '### What\'s done well');
-      for (const p of result.positives) lines.push(`- ${p}`);
-    }
-
-    if (result.testingRecommendations.length > 0) {
-      lines.push('', '### Testing recommendations');
-      for (const t of result.testingRecommendations) lines.push(`- ${t}`);
-    }
-
-    return lines.join('\n');
-  }
-
-  private formatTestgenAsMarkdown(result: { targetFile: string; testFile: string; testCount: number; framework: string; coveredScenarios: string[]; setupNotes: string; testgenId: string }): string {
-    const lines: string[] = [
-      `## 🧪 Generated Tests: \`${result.targetFile}\``,
-      '',
-      `**Test file:** \`${result.testFile}\`  `,
-      `**Framework:** ${result.framework}  `,
-      `**Test count:** ${result.testCount}`,
-      '',
-      '### Covered scenarios',
-    ];
-    for (const s of result.coveredScenarios) lines.push(`- ${s}`);
-    if (result.setupNotes) {
-      lines.push('', '### Setup notes', result.setupNotes);
-    }
-    lines.push('', `*Test ID: \`${result.testgenId}\` — retrieve via \`GET /api/v1/testgen/${result.testgenId}\`*`);
-    return lines.join('\n');
-  }
-
-  // ─── Private helpers ────────────────────────────────────────────────────────
-
-  private async findRepoFiles(repoId: string, query: string): Promise<FileMatchResult[]> {
-    try {
-      return await this.repoSearch.findCandidates(repoId, { query, topK: MAX_FILES });
-    } catch (err: unknown) {
-      this.logger.warn(`[ChatOrchestrator] Repo search failed: ${toMessage(err)}`);
-      return [];
-    }
-  }
-
-  private async retrieveKnowledge(query: string): Promise<ChunkResult[]> {
-    try {
-      return await this.retrieval.retrieve({ query, topK: MAX_KNOWLEDGE_CHUNKS });
-    } catch (err: unknown) {
-      this.logger.warn(`[ChatOrchestrator] Knowledge retrieval failed: ${toMessage(err)}`);
-      return [];
-    }
-  }
-
-  private async readFileContents(
+  /**
+   * Streaming variant — same as `chat()` but fires `onProgress` on each tool call.
+   * The caller is responsible for forwarding events to the client (e.g. via SSE).
+   */
+  async chatStream(
+    sessionId: string,
     repoId: string,
-    candidates: FileMatchResult[],
-  ): Promise<Array<{ filePath: string; content: string }>> {
-    const results: Array<{ filePath: string; content: string }> = [];
+    message: string,
+    repoName: string,
+    onProgress: (event: ReactProgressEvent) => void,
+    pathPrefix?: string,
+  ): Promise<ChatOrchestratorResult> {
+    const history = await this.memory.getContextWindow(sessionId);
+    const priorHistory = history.map((m: ChatMessage) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    }));
 
-    for (const candidate of candidates.slice(0, MAX_FILES)) {
-      try {
-        const file = await this.repoService.readFileByPath(repoId, candidate.filePath);
-        results.push({
-          filePath: file.filePath,
-          content: truncateContent(file.content, MAX_FILE_LINES, MAX_FILE_CHARS),
-        });
-      } catch {
-        this.logger.debug(
-          `[ChatOrchestrator] Could not read "${candidate.filePath}" — skipping`,
-        );
+    const tools = [
+      ...this.toolsRegistry.getAll(),
+      this.webResearchTool,
+    ];
+
+    const systemPrompt = buildAgentSystemPrompt(repoName, pathPrefix);
+
+    const result = await this.reactEngine.run({
+      systemPrompt,
+      userMessage: message,
+      tools,
+      repoId,
+      priorHistory,
+      maxIterations: 25,
+      onProgress,
+    });
+
+    const toolSteps = extractToolSteps(result.history);
+    const relevantFiles = extractTouchedFiles(result.history);
+
+    return {
+      reply: result.answer || "I wasn't able to complete that — please try rephrasing.",
+      relevantFiles,
+      sources: [],
+      toolSteps,
+    };
+  }
+}
+
+// ─── System prompt ────────────────────────────────────────────────────────────
+
+function buildAgentSystemPrompt(repoName: string, pathPrefix?: string): string {
+  const scope = repoName
+    ? pathPrefix
+      ? `the "${repoName}" codebase (focused on the \`${pathPrefix}\` folder)`
+      : `the "${repoName}" codebase`
+    : 'this codebase';
+
+  const nodeVersionMajor = parseInt(process.versions.node.split('.')[0], 10);
+  const nodeVersion = process.versions.node;
+  const viteVersion = nodeVersionMajor >= 20 ? '6' : '5';
+  const nextVersion = nodeVersionMajor >= 18 ? '14' : '13';
+
+  return `You are an expert engineering assistant with FULL ACCESS to ${scope}.
+
+You have tools to:
+- CHECK ENVIRONMENT: use \`check_environment\` to get Node.js version and compatible framework versions
+- READ files: use \`read_file\`, \`read_files\`, \`search_files\`, \`grep_code\`, \`get_repo_tree\`
+- WRITE files: use \`write_file\` to create or modify any file
+- CREATE directories: use \`create_directory\`
+- SCAFFOLD projects: use \`scaffold_project\` (always pass version= from check_environment first)
+- RUN tests: use \`run_tests\` (supports test, test:cov, test:e2e)
+- RUN commands: use \`run_command\` (supports install, build, dev, typecheck, etc.)
+- SEARCH the web: use \`web_research\`
+- FETCH URLs: use \`web_fetch\`
+- GENERATE diffs: use \`generate_diff\`
+- RUN linting: use \`run_lint\`
+
+RUNTIME ENVIRONMENT:
+- Node.js: v${nodeVersion} (major: ${nodeVersionMajor}) — platform: ${process.platform} ${process.arch}
+- Recommended: vite@${viteVersion}, next@${nextVersion}
+- ALWAYS call check_environment before scaffolding to confirm compatible versions
+
+BEHAVIOUR RULES:
+1. Always READ a file before modifying it — never guess at existing content.
+2. When asked to write tests: generate the test code then use write_file to write it to disk, then run_tests to verify it passes.
+3. When asked to fix a bug: read the file, understand the bug, write the fix, run tests to verify.
+4. When tests fail: read the error output, fix the code, run tests again. Retry up to 3 times.
+5. After completing changes, summarise exactly what was done (files changed, test results).
+6. Use search_files or grep_code to find relevant files before reading them all.
+7. Keep changes focused — only modify what is needed for the task.
+
+ERROR RECOVERY RULES:
+- When a tool returns {"error": "..."} — read the error, understand why it failed, try a different approach.
+- Never give up after one failure — try at least 2 alternative strategies before reporting failure.
+- Version incompatibility (e.g. "requires Node 20+"): use the recommended version listed above.
+- If scaffold_project fails: fall back to create_directory + write_file to create project files manually.
+
+Answer questions with markdown. Use fenced code blocks with language tags.
+When making changes, work systematically: plan → read → write → verify → report.`;
+}
+
+// ─── Extract tool steps from ReactEngine history ─────────────────────────────
+
+function extractToolSteps(history: LlmMessage[]): ToolStep[] {
+  const steps: ToolStep[] = [];
+
+  for (let i = 0; i < history.length; i++) {
+    const msg = history[i];
+    if (msg.role !== 'assistant' || !msg.toolCalls?.length) continue;
+
+    for (const call of msg.toolCalls) {
+      // Find the matching tool result
+      const resultMsg = history.slice(i + 1).find(
+        (m) => m.role === 'tool' && m.toolCallId === call.id,
+      );
+
+      const output = resultMsg?.content ?? '';
+      const success = !output.includes('"error"') || output.includes('"passed":true');
+
+      steps.push({
+        toolName: call.name,
+        label: formatToolLabel(call.name, call.arguments),
+        input: call.arguments,
+        output: output.length > 500 ? output.slice(0, 500) + '…' : output,
+        success,
+      });
+    }
+  }
+
+  return steps;
+}
+
+function formatToolLabel(toolName: string, args: Record<string, unknown>): string {
+  switch (toolName) {
+    case 'read_file':
+      return `Read ${args['filePath'] ?? 'file'}`;
+    case 'read_files':
+      return `Read ${Array.isArray(args['filePaths']) ? (args['filePaths'] as string[]).length : '?'} files`;
+    case 'write_file':
+      return `Write ${args['filePath'] ?? 'file'}`;
+    case 'create_directory':
+      return `Create directory ${args['dirPath'] ?? ''}`;
+    case 'search_files':
+      return `Search: "${args['query'] ?? ''}"`;
+    case 'grep_code':
+      return `Grep: "${args['pattern'] ?? ''}"`;
+    case 'get_repo_tree':
+      return `Get repo tree${args['pathPrefix'] ? ` (${args['pathPrefix']})` : ''}`;
+    case 'generate_diff':
+      return `Generate diff for ${args['filePath'] ?? 'file'}`;
+    case 'run_tests':
+      return `Run tests${args['testFile'] ? ` (${args['testFile']})` : ''}`;
+    case 'run_lint':
+      return `Run lint`;
+    case 'run_command':
+      return `Run npm ${args['script'] ?? 'command'}`;
+    case 'scaffold_project':
+      return `Scaffold ${args['projectName'] ?? 'project'}`;
+    case 'web_research':
+      return `Web search: "${args['query'] ?? ''}"`;
+    case 'web_fetch':
+      return `Fetch ${args['url'] ?? 'URL'}`;
+    default:
+      return toolName;
+  }
+}
+
+function extractTouchedFiles(history: LlmMessage[]): string[] {
+  const files = new Set<string>();
+
+  for (const msg of history) {
+    if (msg.role !== 'assistant' || !msg.toolCalls?.length) continue;
+    for (const call of msg.toolCalls) {
+      if (['read_file', 'write_file', 'run_tests'].includes(call.name)) {
+        const fp = call.arguments['filePath'] ?? call.arguments['testFile'];
+        if (typeof fp === 'string') files.add(fp);
+      }
+      if (call.name === 'read_files' && Array.isArray(call.arguments['filePaths'])) {
+        for (const fp of call.arguments['filePaths'] as string[]) files.add(fp);
       }
     }
-
-    return results;
   }
 
-  private buildMessages(
-    repoName: string,
-    history: ChatMessage[],
-    userMessage: string,
-    files: Array<{ filePath: string; content: string }>,
-    chunks: ChunkResult[],
-  ): LlmMessage[] {
-    const systemContent = buildSystemPrompt(repoName, files, chunks);
-
-    const messages: LlmMessage[] = [{ role: 'system', content: systemContent }];
-
-    // Inject conversation history so the LLM has multi-turn context.
-    for (const msg of history) {
-      messages.push({ role: msg.role, content: msg.content });
-    }
-
-    messages.push({ role: 'user', content: userMessage });
-
-    return messages;
-  }
-}
-
-// ─── Module-level utilities ───────────────────────────────────────────────────
-
-function buildSystemPrompt(
-  repoName: string,
-  files: Array<{ filePath: string; content: string }>,
-  chunks: ChunkResult[],
-): string {
-  const hasContext = files.length > 0 || chunks.length > 0;
-  const lines: string[] = [
-    `You are an expert engineering assistant${repoName ? ` for the "${repoName}" codebase` : ''}.`,
-    `Answer questions clearly and accurately using Markdown.`,
-    `When writing code, always use fenced code blocks with the language tag (e.g. \`\`\`typescript).`,
-    hasContext
-      ? `Use the provided file contents and documentation below to give precise, grounded answers.`
-      : `Answer from your general knowledge.`,
-  ];
-
-  if (files.length > 0) {
-    lines.push('', '═══ REPOSITORY FILES ═══');
-    for (const file of files) {
-      lines.push('', `### ${file.filePath}`, '```', file.content, '```');
-    }
-  }
-
-  if (chunks.length > 0) {
-    lines.push('', '═══ KNOWLEDGE BASE ═══');
-    for (const chunk of chunks) {
-      lines.push('', `### [${chunk.sourceTitle}]`, chunk.content);
-    }
-  }
-
-  return lines.join('\n');
-}
-
-function truncateContent(content: string, maxLines: number, maxChars: number): string {
-  const lines = content.split('\n');
-
-  let result = lines.length > maxLines
-    ? lines.slice(0, maxLines).join('\n') + `\n// ... (truncated — showing first ${maxLines} of ${lines.length} lines)`
-    : content;
-
-  if (result.length > maxChars) {
-    result = result.slice(0, maxChars) + '\n// ... (truncated)';
-  }
-
-  return result;
-}
-
-function toMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return [...files];
 }

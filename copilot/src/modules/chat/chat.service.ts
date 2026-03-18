@@ -5,6 +5,7 @@ import { RunsService } from '../runs/runs.service';
 import { RepoService } from '../repo/repo.service';
 import { RunType } from '../../common/enums/run-type.enum';
 import { ChatRequestDto, ChatResponseDto } from './dto/chat.dto';
+import { ReactProgressEvent } from '../agent/react-engine.service';
 
 @Injectable()
 export class ChatService {
@@ -29,18 +30,20 @@ export class ChatService {
     await this.runsService.markRunning(run.id);
 
     try {
-      const repo = await this.repoService.findOne(dto.repoId);
+      const repo = dto.repoId ? await this.repoService.findOne(dto.repoId) : null;
+      const repoName = repo?.fullName ?? '';
 
       // Ensure the session row exists before writing messages.
-      await this.memory.ensureSession(dto.sessionId, dto.repoId, userId);
+      await this.memory.ensureSession(dto.sessionId, dto.repoId ?? null, userId);
 
       // Run the orchestrator FIRST so getContextWindow only sees previous turns.
       // Persisting the user message beforehand would duplicate it in the LLM prompt.
       const result = await this.orchestrator.chat(
         dto.sessionId,
-        dto.repoId,
+        dto.repoId ?? '',
         dto.message,
-        repo.fullName,
+        repoName,
+        dto.pathPrefix,
       );
 
       // Persist both turns after the reply so history is consistent.
@@ -72,12 +75,67 @@ export class ChatService {
         sessionId: dto.sessionId,
         durationMs,
         agentAction: result.agentAction,
+        toolSteps: result.toolSteps,
       };
     } catch (err: unknown) {
       const durationMs = Date.now() - start;
       const message = err instanceof Error ? err.message : String(err);
       await this.runsService.fail(run.id, message, durationMs);
       this.logger.error(`[ChatService] sessionId="${dto.sessionId}" runId=${run.id} FAILED: ${message}`);
+      throw err;
+    }
+  }
+
+  /** Streaming variant — same as chat() but fires onProgress on each tool call. */
+  async chatStream(
+    dto: ChatRequestDto,
+    onProgress: (event: ReactProgressEvent) => void,
+    userId?: string,
+  ): Promise<ChatResponseDto> {
+    const start = Date.now();
+
+    const run = await this.runsService.create({
+      type: RunType.CHAT,
+      repoId: dto.repoId,
+      input: { sessionId: dto.sessionId, messageLength: dto.message.length },
+    });
+
+    await this.runsService.markRunning(run.id);
+
+    try {
+      const repo = dto.repoId ? await this.repoService.findOne(dto.repoId) : null;
+      const repoName = repo?.fullName ?? '';
+      await this.memory.ensureSession(dto.sessionId, dto.repoId ?? null, userId);
+
+      const result = await this.orchestrator.chatStream(
+        dto.sessionId,
+        dto.repoId ?? '',
+        dto.message,
+        repoName,
+        onProgress,
+        dto.pathPrefix,
+      );
+
+      await this.memory.addMessage(dto.sessionId, 'user', dto.message);
+      await this.memory.addMessage(dto.sessionId, 'assistant', result.reply);
+
+      const durationMs = Date.now() - start;
+      await this.runsService.complete(run.id, { sessionId: dto.sessionId, replyLength: result.reply.length }, durationMs);
+
+      return {
+        reply: result.reply,
+        relevantFiles: result.relevantFiles,
+        sources: result.sources,
+        runId: run.id,
+        sessionId: dto.sessionId,
+        durationMs,
+        agentAction: result.agentAction,
+        toolSteps: result.toolSteps,
+      };
+    } catch (err: unknown) {
+      const durationMs = Date.now() - start;
+      const message = err instanceof Error ? err.message : String(err);
+      await this.runsService.fail(run.id, message, durationMs);
       throw err;
     }
   }

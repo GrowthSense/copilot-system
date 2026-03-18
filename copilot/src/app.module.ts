@@ -16,6 +16,9 @@ import { ApprovalModule } from './modules/approval/approval.module';
 import { PrDraftModule } from './modules/prdraft/prdraft.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { MemoryModule } from './modules/memory/memory.module';
+import { WebResearchModule } from './modules/web-research/web-research.module';
+import { AgentTaskModule } from './modules/agent-task/agent-task.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -37,6 +40,9 @@ import { HealthController } from './health.controller';
     PrDraftModule,
     ChatModule,
     AuthModule,
+    MemoryModule,
+    WebResearchModule,
+    AgentTaskModule,
   ],
   controllers: [HealthController],
 })
