@@ -17,6 +17,8 @@ import { RunCommandTool } from './tools/run-command.tool';
 import { ScaffoldProjectTool } from './tools/scaffold-project.tool';
 import { WebFetchTool } from './tools/web-fetch.tool';
 import { CheckEnvironmentTool } from './tools/check-environment.tool';
+import { StartDevServerTool } from './tools/start-dev-server.tool';
+import { StopDevServerTool } from './tools/stop-dev-server.tool';
 
 // Framework
 import { ToolsRegistry } from './tools.registry';
@@ -46,11 +48,13 @@ import { ToolsController } from './tools.controller';
     ScaffoldProjectTool,
     WebFetchTool,
     CheckEnvironmentTool,
+    StartDevServerTool,
+    StopDevServerTool,
     // Framework
     ToolsRegistry,
     ToolsExecutor,
     ToolsService,
   ],
-  exports: [ToolsService, ToolsRegistry, ToolsExecutor, RunTestsTool, WriteFileTool, CreateDirectoryTool, RunCommandTool, ScaffoldProjectTool, WebFetchTool, CheckEnvironmentTool],
+  exports: [ToolsService, ToolsRegistry, ToolsExecutor, RunTestsTool, WriteFileTool, CreateDirectoryTool, RunCommandTool, ScaffoldProjectTool, WebFetchTool, CheckEnvironmentTool, StartDevServerTool, StopDevServerTool],
 })
 export class ToolsModule {}

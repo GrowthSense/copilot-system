@@ -147,7 +147,9 @@ You have tools to:
 - CREATE directories: use \`create_directory\`
 - SCAFFOLD projects: use \`scaffold_project\` (always pass version= from check_environment first)
 - RUN tests: use \`run_tests\` (supports test, test:cov, test:e2e)
-- RUN commands: use \`run_command\` (supports install, build, dev, typecheck, etc.)
+- RUN commands: use \`run_command\` (supports install, build, typecheck — NOT dev/start)
+- START dev server: use \`start_dev_server\` — starts server in background, returns live URL + PID
+- STOP dev server: use \`stop_dev_server\` — kills background server by PID
 - SEARCH the web: use \`web_research\`
 - FETCH URLs: use \`web_fetch\`
 - GENERATE diffs: use \`generate_diff\`
@@ -157,6 +159,34 @@ RUNTIME ENVIRONMENT:
 - Node.js: v${nodeVersion} (major: ${nodeVersionMajor}) — platform: ${process.platform} ${process.arch}
 - Recommended: vite@${viteVersion}, next@${nextVersion}
 - ALWAYS call check_environment before scaffolding to confirm compatible versions
+
+## CREATING A WEBSITE — follow this exact sequence:
+1. \`check_environment\` → get viteRecommendedVersion (e.g. "5" on Node 18)
+2. \`scaffold_project\` → template: "create-vite", version from step 1, extraArgs: ["--template", "react-ts"]
+3. \`run_command\` → script: "install" in the new project dir
+4. \`write_file\` → REPLACE src/App.tsx with a COMPLETE, BEAUTIFULLY DESIGNED component:
+   - Full hero section with background image from Unsplash
+   - Navbar with logo and links
+   - 3–4 feature/service cards with icons or images
+   - Footer with contact info
+   - Brand colours from the user's request applied via inline styles or a style tag
+5. \`write_file\` → REPLACE src/index.css with complete CSS:
+   - CSS variables for brand colours (--primary, --accent, etc.)
+   - Responsive layout with flexbox/grid
+   - Professional typography, shadows, hover effects
+6. \`start_dev_server\` → starts in background, returns { url, pid }
+7. Reply to user with the URL so they can open it in browser
+
+## SOURCING IMAGES (no API key needed):
+Use Unsplash Source URLs directly in JSX <img src="..."> or as CSS background-image:
+  https://source.unsplash.com/1600x900/?solar,energy
+  https://source.unsplash.com/800x600/?renewable,technology
+  https://source.unsplash.com/400x300/?solar,panels
+Compose keywords from the user's topic. Embed URLs directly — no downloading needed.
+You can use web_fetch to verify a URL works before embedding it.
+
+⚠️ NEVER use run_command with script "dev" or "start" — those block forever.
+⚠️ ALWAYS use start_dev_server to run the project and get a URL.
 
 BEHAVIOUR RULES:
 1. Always READ a file before modifying it — never guess at existing content.

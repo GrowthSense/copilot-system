@@ -14,6 +14,8 @@ import { RunCommandTool } from './tools/run-command.tool';
 import { ScaffoldProjectTool } from './tools/scaffold-project.tool';
 import { WebFetchTool } from './tools/web-fetch.tool';
 import { CheckEnvironmentTool } from './tools/check-environment.tool';
+import { StartDevServerTool } from './tools/start-dev-server.tool';
+import { StopDevServerTool } from './tools/stop-dev-server.tool';
 
 @Injectable()
 export class ToolsRegistry {
@@ -34,6 +36,8 @@ export class ToolsRegistry {
     private readonly scaffoldProject: ScaffoldProjectTool,
     private readonly webFetch: WebFetchTool,
     private readonly checkEnvironment: CheckEnvironmentTool,
+    private readonly startDevServer: StartDevServerTool,
+    private readonly stopDevServer: StopDevServerTool,
   ) {
     this.tools = new Map<string, IAgentTool>([
       [checkEnvironment.name, checkEnvironment],
@@ -50,6 +54,8 @@ export class ToolsRegistry {
       [runCommand.name, runCommand],
       [scaffoldProject.name, scaffoldProject],
       [webFetch.name, webFetch],
+      [startDevServer.name, startDevServer],
+      [stopDevServer.name, stopDevServer],
     ]);
   }
 
