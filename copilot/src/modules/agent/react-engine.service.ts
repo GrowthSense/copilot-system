@@ -145,11 +145,19 @@ export class ReactEngine {
           success,
         });
 
+        // Truncate large tool outputs before adding to LLM context.
+        // Full output is shown in the UI via onProgress; the LLM only needs a summary.
+        const MAX_TOOL_RESULT_CHARS = 3000;
+        const truncatedResult =
+          result.length > MAX_TOOL_RESULT_CHARS
+            ? result.slice(0, MAX_TOOL_RESULT_CHARS) + `\n\n[...output truncated — ${result.length - MAX_TOOL_RESULT_CHARS} more chars]`
+            : result;
+
         history.push({
           role: 'tool',
           toolCallId: call.id,
           toolName: call.name,
-          content: result,
+          content: truncatedResult,
         });
 
         if (!result.startsWith('{"error"')) toolCallCount++;

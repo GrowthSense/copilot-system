@@ -54,12 +54,13 @@ export default function ChatSidebar({ repoId, activeSessionId, sessionsVersion, 
 
   const load = useCallback(async () => {
     try {
-      const data = await listChatSessions(repoId || undefined);
+      // Always load all sessions — don't filter by repo so history is complete
+      const data = await listChatSessions();
       setSessions(data);
     } catch {
       // backend not reachable — show nothing
     }
-  }, [repoId]);
+  }, []);
 
   // Single stable dep: refreshKey encodes both session identity and message version.
   const refreshKey = `${activeSessionId}:${sessionsVersion}`;
@@ -160,10 +161,17 @@ export default function ChatSidebar({ repoId, activeSessionId, sessionsVersion, 
                   }}
                 >
                   <MessageSquare size={12} color={isActive ? '#fff' : 'var(--text-muted)'} style={{ flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: isActive ? '#fff' : 'var(--text-subtle)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
-                    {s.title}
-                  </span>
-                  <span style={{ marginLeft: 'auto', fontSize: 10, color: isActive ? 'rgba(255,255,255,0.65)' : 'var(--text-muted)', flexShrink: 0 }}>
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <div style={{ fontSize: 12, color: isActive ? '#fff' : 'var(--text-subtle)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {s.title}
+                    </div>
+                    {s.repoId && (
+                      <div style={{ fontSize: 10, color: isActive ? 'rgba(255,255,255,0.5)' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {s.repoId.slice(-8)}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{ marginLeft: 4, fontSize: 10, color: isActive ? 'rgba(255,255,255,0.65)' : 'var(--text-muted)', flexShrink: 0 }}>
                     {formatTime(s.updatedAt)}
                   </span>
                 </button>

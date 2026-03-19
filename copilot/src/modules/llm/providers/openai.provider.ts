@@ -22,6 +22,7 @@ export class OpenAiProvider implements ILlmProvider {
       defaultHeaders: config.llmBaseUrl
         ? { 'HTTP-Referer': 'https://buntu.finance', 'X-Title': 'Buntu Copilot' }
         : {},
+      timeout: 90_000, // 90 second hard timeout — prevents hanging forever
     });
   }
 
